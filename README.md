@@ -67,7 +67,7 @@ godot --headless --path . -s res://tests/test_sim.gd
 | `sim/match_config.gd` | Mode flags + setup slots (`MatchConfig`) |
 | `sim/bot.gd` | Bot → `Input` only |
 | `scripts/main.gd` | Setup / slots / keyboard + bots / split panes / shared pause / end card |
-| `scripts/world_view.gd` | Shared World2D draw (map + holes); all panes read it |
+| `scripts/world_view.gd` | Shared World2D draw (painted ground, roads/parks, prop silhouettes); all panes read it |
 | `scenes/main.tscn` | Main scene |
 | `tests/test_sim.gd` | Headless rule checks |
 
