@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://bmunchiesphase1"]
+[gd_scene load_steps=5 format=3 uid="uid://bmunchiesphase1"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world_view.gd" id="2_world"]
 [ext_resource type="AudioStream" path="res://audio/swallow_blip.wav" id="3_blip"]
+[ext_resource type="Script" path="res://scripts/world_view_3d.gd" id="4_world3d"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -11,6 +12,11 @@ script = ExtResource("1_main")
 
 [node name="World" type="Node2D" parent="."]
 script = ExtResource("2_world")
+
+[node name="World3DHold" type="Node" parent="."]
+
+[node name="World3D" type="Node3D" parent="."]
+script = ExtResource("4_world3d")
 
 [node name="BlipPlayer" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("3_blip")

@@ -2,6 +2,8 @@ extends Node2D
 ## Phase 6 view: setup (modes + slot list + optional bots) → couch split-screen.
 ## Slot 0 = keyboard; other filled slots = bots until pads exist. Esc pauses all.
 ## Unlimited never shows a clock or score target. Shared end card for ending modes.
+## 3D spike: presentation-only World3D reads sim each frame. F3 toggles 2D/3D.
+## Multi-pane 3D is deferred — 3D mode uses one pane following the keyboard hole.
 
 const PIXELS_PER_METER := 24.0
 const CAMERA_SETTLE := 0.2
@@ -9,12 +11,18 @@ const HOLE_SCREEN_FRACTION := 0.20 ## diameter vs shorter pane side
 const SWALLOW_TWEEN_SEC := 0.20
 const PANE_GAP := 3.0
 const TOP_HUD_BAND := 72.0
+## 3D camera: height / back offset in hole-radii (tilted chase).
+const CAM3D_HEIGHT_MULT := 9.0
+const CAM3D_BACK_MULT := 11.0
+const CAM3D_BASE_M := 6.0
 
 enum Screen { SETUP, PLAYING, ENDED }
 enum SetupFocus { MODES, SLOTS }
 
 @onready var world: Node2D = $World
 @onready var world_hold: Node2D = $WorldHold
+@onready var world3d: Node3D = $World3D
+@onready var world3d_hold: Node = $World3DHold
 @onready var pane_host: Control = $SplitLayer/PaneHost
 @onready var hud: CanvasLayer = $HUD
 @onready var title_label: Label = $HUD/Margin/VBox/Title
@@ -42,6 +50,8 @@ var _setup_focus: SetupFocus = SetupFocus.MODES
 var _slot_cursor: int = 1
 ## Four setup slots. Slot 0 is always keyboard when filled.
 var _slots: PackedStringArray = MatchConfig.default_slots(4)
+## Presentation path. Default 3D for the spike; F3 or --view=2d / --view=3d.
+var use_3d_view := true
 
 ## Presentation-only swallow ghosts: {x,y,radius,tier,scale,age,target_x,target_y,hole_id}
 var swallow_tweens: Array = []
@@ -49,7 +59,8 @@ var swallow_flash: float = 0.0
 var swallow_flash_hole: int = -1
 
 ## Per-pane camera / overlay state.
-## {hole_id, camera, cam_pos, cam_zoom, score_label, radius_label, viewport, frame}
+## 2D: {hole_id, camera, cam_pos, cam_zoom, score_label, radius_label, viewport, frame}
+## 3D: same + cam_pos is Vector3 look target, camera is Camera3D
 var _panes: Array = []
 
 const MODE_ORDER := [
@@ -63,9 +74,13 @@ const MODE_ORDER := [
 
 func _ready() -> void:
 	sim = MunchiesSim.new()
+	_apply_view_cmdline()
 	if world.get_parent() != world_hold:
 		world.reparent(world_hold)
+	if world3d.get_parent() != world3d_hold:
+		world3d.reparent(world3d_hold)
 	world.set("host", self)
+	world3d.set("host", self)
 	pane_host.set_anchors_preset(Control.PRESET_FULL_RECT)
 	pane_host.offset_top = TOP_HUD_BAND
 	split_layer.visible = false
@@ -77,6 +92,16 @@ func _ready() -> void:
 	_build_setup_list()
 	_refresh_slot_list()
 	_show_setup()
+
+
+func _apply_view_cmdline() -> void:
+	## godot --path . -- --view=2d  or  --view=3d
+	for arg in OS.get_cmdline_user_args():
+		var a := str(arg).to_lower()
+		if a == "--view=2d" or a == "view=2d":
+			use_3d_view = false
+		elif a == "--view=3d" or a == "view=3d":
+			use_3d_view = true
 
 
 func _build_setup_list() -> void:
@@ -127,14 +152,15 @@ func _refresh_slot_list() -> void:
 		filled += 1
 		if str(k) == MatchConfig.SLOT_BOT:
 			bots += 1
-	setup_summary.text = "Filled %d/4 · bots %d · panes: %s  (pads deferred)" % [
+	var view_label := "3D (1 pane)" if use_3d_view else "2D (%s)" % _pane_layout_label(filled)
+	setup_summary.text = "Filled %d/4 · bots %d · view: %s  (pads deferred)" % [
 		filled,
 		bots,
-		_pane_layout_label(filled),
+		view_label,
 	]
 	var focus_hint := "modes" if _setup_focus == SetupFocus.MODES else "slots"
 	setup_hint.text = (
-		"Tab: %s · ↑↓ move · ←→ bot/empty on slots 2–4 · Enter start · Esc pauses in-match"
+		"Tab: %s · ↑↓ move · ←→ bot/empty · F3 2D/3D · Enter start · Esc pauses in-match"
 		% focus_hint
 	)
 
@@ -159,7 +185,7 @@ func _show_setup() -> void:
 	setup_panel.visible = true
 	end_panel.visible = false
 	title_label.text = "Munchies — Phase 6"
-	mode_line.text = "Setup · Timer at 2:00 · optional bots · shared end card"
+	mode_line.text = "Setup · Timer at 2:00 · optional bots · F3 toggles 2D/3D view"
 	score_label.text = ""
 	radius_label.text = ""
 	hint_label.text = ""
@@ -257,6 +283,10 @@ func _process(dt: float) -> void:
 
 
 func _process_setup() -> void:
+	if Input.is_action_just_pressed("toggle_view"):
+		_toggle_view_mode()
+		return
+
 	if Input.is_key_pressed(KEY_TAB):
 		if not _tab_held:
 			_tab_held = true
@@ -291,6 +321,14 @@ func _process_setup() -> void:
 var _tab_held := false
 
 
+func _toggle_view_mode() -> void:
+	use_3d_view = not use_3d_view
+	_refresh_slot_list()
+	if _screen == Screen.PLAYING:
+		_rebuild_panes()
+		split_layer.visible = true
+
+
 func _toggle_slot(index: int) -> void:
 	if index <= 0:
 		# Slot 1 (index 0) stays keyboard for the local human.
@@ -309,6 +347,9 @@ func _process_playing(dt: float) -> void:
 	if Input.is_action_just_pressed("pause"):
 		_paused = not _paused
 
+	if Input.is_action_just_pressed("toggle_view"):
+		_toggle_view_mode()
+
 	if not _paused and not sim.match_over:
 		var inputs := _collect_inputs()
 		var events: Array = sim.step(inputs, dt)
@@ -320,7 +361,10 @@ func _process_playing(dt: float) -> void:
 	_sync_pane_sizes()
 	_update_cameras(dt)
 	_update_hud()
-	if world != null:
+	if use_3d_view:
+		if world3d != null and world3d.has_method("sync_from_sim"):
+			world3d.sync_from_sim()
+	elif world != null:
 		world.queue_redraw()
 
 
@@ -407,6 +451,8 @@ func _tick_presentation(dt: float) -> void:
 func _teardown_panes() -> void:
 	if world != null and is_instance_valid(world) and world.get_parent() != world_hold:
 		world.reparent(world_hold)
+	if world3d != null and is_instance_valid(world3d) and world3d.get_parent() != world3d_hold:
+		world3d.reparent(world3d_hold)
 	for child in pane_host.get_children():
 		child.queue_free()
 	_panes.clear()
@@ -414,6 +460,97 @@ func _teardown_panes() -> void:
 
 func _rebuild_panes() -> void:
 	_teardown_panes()
+	if use_3d_view:
+		_rebuild_panes_3d()
+	else:
+		_rebuild_panes_2d()
+
+
+func _rebuild_panes_3d() -> void:
+	## Spike: one 3D pane following the keyboard hole. Split-screen 3D deferred.
+	var follow: Dictionary = _keyboard_hole()
+	if follow.is_empty() and not sim.holes.is_empty():
+		follow = sim.holes[0]
+	if follow.is_empty():
+		return
+
+	var layout := _make_layout(1)
+	pane_host.add_child(layout)
+	var cell: Control = layout.get_node("Cell0") as Control
+
+	var frame := Control.new()
+	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cell.add_child(frame)
+
+	var svc := SubViewportContainer.new()
+	svc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	svc.stretch = true
+	svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(svc)
+
+	var sv := SubViewport.new()
+	sv.disable_3d = false
+	sv.transparent_bg = false
+	sv.handle_input_locally = false
+	sv.gui_disable_input = true
+	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	sv.own_world_3d = true
+	sv.size = Vector2i(2, 2)
+	svc.add_child(sv)
+
+	# Soft daylight + sky so meshes read without a baked env resource.
+	var env := WorldEnvironment.new()
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color(0.45, 0.58, 0.72)
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color(0.55, 0.60, 0.58)
+	environment.ambient_light_energy = 0.55
+	env.environment = environment
+	sv.add_child(env)
+
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-48, 35, 0)
+	sun.light_energy = 1.15
+	sun.shadow_enabled = false
+	sv.add_child(sun)
+
+	world3d.reparent(sv)
+	if world3d.has_method("clear_presentation"):
+		world3d.clear_presentation()
+	world3d.set("host", self)
+
+	var cam := Camera3D.new()
+	cam.current = true
+	cam.fov = 50.0
+	cam.near = 0.2
+	cam.far = 400.0
+	sv.add_child(cam)
+
+	var labels := _make_pane_overlay(frame, follow, 0)
+	var look := Vector3(float(follow["x"]), 0.0, float(follow["y"]))
+	var r: float = float(follow["radius"])
+	_place_camera_3d(cam, look, r)
+
+	_panes.append({
+		"hole_id": int(follow["id"]),
+		"camera": cam,
+		"cam_pos": look,
+		"cam_zoom": r,
+		"score_label": labels["score"],
+		"radius_label": labels["radius"],
+		"viewport": sv,
+		"frame": frame,
+		"is_3d": true,
+	})
+
+	_sync_pane_sizes()
+	if world3d.has_method("sync_from_sim"):
+		world3d.sync_from_sim()
+
+
+func _rebuild_panes_2d() -> void:
 	var n: int = sim.holes.size()
 	var layout := _make_layout(n)
 	pane_host.add_child(layout)
@@ -455,38 +592,7 @@ func _rebuild_panes() -> void:
 		cam.enabled = true
 		sv.add_child(cam)
 
-		var overlay := MarginContainer.new()
-		overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-		overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		overlay.add_theme_constant_override("margin_left", 10)
-		overlay.add_theme_constant_override("margin_top", 8)
-		overlay.add_theme_constant_override("margin_right", 10)
-		overlay.add_theme_constant_override("margin_bottom", 8)
-		frame.add_child(overlay)
-
-		var vbox := VBoxContainer.new()
-		vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		vbox.add_theme_constant_override("separation", 2)
-		overlay.add_child(vbox)
-
-		var name_l := Label.new()
-		var slot: int = int(hole.get("slot", i))
-		var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
-		name_l.text = str(hole.get("name", "Hole"))
-		name_l.add_theme_color_override("font_color", ring)
-		name_l.add_theme_font_size_override("font_size", 16)
-		vbox.add_child(name_l)
-
-		var score_l := Label.new()
-		score_l.add_theme_color_override("font_color", Color(0.95, 0.95, 0.92))
-		score_l.add_theme_font_size_override("font_size", 22)
-		vbox.add_child(score_l)
-
-		var radius_l := Label.new()
-		radius_l.add_theme_color_override("font_color", Color(0.75, 0.88, 0.82))
-		radius_l.add_theme_font_size_override("font_size", 16)
-		vbox.add_child(radius_l)
-
+		var labels := _make_pane_overlay(frame, hole, i)
 		var cam_pos := Vector2(float(hole["x"]), float(hole["y"])) * PIXELS_PER_METER
 		cam.position = cam_pos
 		var z: float = _desired_zoom(float(hole["radius"]), Vector2(640, 360))
@@ -497,14 +603,66 @@ func _rebuild_panes() -> void:
 			"camera": cam,
 			"cam_pos": cam_pos,
 			"cam_zoom": z,
-			"score_label": score_l,
-			"radius_label": radius_l,
+			"score_label": labels["score"],
+			"radius_label": labels["radius"],
 			"viewport": sv,
 			"frame": frame,
+			"is_3d": false,
 		})
 
 	_sync_pane_sizes()
 	world.queue_redraw()
+
+
+func _make_pane_overlay(frame: Control, hole: Dictionary, slot_fallback: int) -> Dictionary:
+	var overlay := MarginContainer.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_theme_constant_override("margin_left", 10)
+	overlay.add_theme_constant_override("margin_top", 8)
+	overlay.add_theme_constant_override("margin_right", 10)
+	overlay.add_theme_constant_override("margin_bottom", 8)
+	frame.add_child(overlay)
+
+	var vbox := VBoxContainer.new()
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_theme_constant_override("separation", 2)
+	overlay.add_child(vbox)
+
+	var name_l := Label.new()
+	var slot: int = int(hole.get("slot", slot_fallback))
+	var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
+	name_l.text = str(hole.get("name", "Hole"))
+	name_l.add_theme_color_override("font_color", ring)
+	name_l.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(name_l)
+
+	var score_l := Label.new()
+	score_l.add_theme_color_override("font_color", Color(0.95, 0.95, 0.92))
+	score_l.add_theme_font_size_override("font_size", 22)
+	vbox.add_child(score_l)
+
+	var radius_l := Label.new()
+	radius_l.add_theme_color_override("font_color", Color(0.75, 0.88, 0.82))
+	radius_l.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(radius_l)
+
+	return {"score": score_l, "radius": radius_l}
+
+
+func _keyboard_hole() -> Dictionary:
+	for hole_v in sim.holes:
+		var hole: Dictionary = hole_v
+		if not bool(hole.get("is_bot", false)):
+			return hole
+	return {}
+
+
+func _place_camera_3d(cam: Camera3D, look: Vector3, radius: float) -> void:
+	var dist: float = CAM3D_BASE_M + radius * CAM3D_BACK_MULT
+	var height: float = CAM3D_BASE_M * 0.7 + radius * CAM3D_HEIGHT_MULT
+	var cam_pos := look + Vector3(0.0, height, dist)
+	cam.look_at_from_position(cam_pos, look + Vector3(0.0, radius * 0.2, 0.0), Vector3.UP)
 
 
 func _make_layout(n: int) -> Control:
@@ -609,26 +767,11 @@ func _update_cameras(dt: float) -> void:
 		var hole: Dictionary = sim.hole_by_id(int(pane["hole_id"]))
 		if hole.is_empty():
 			continue
-		var cam: Camera2D = pane["camera"]
-		var target := Vector2(float(hole["x"]), float(hole["y"])) * PIXELS_PER_METER
-		var vel := Vector2(float(hole["vx"]), float(hole["vy"])) * PIXELS_PER_METER
-		var look := vel * 0.15
-		var look_cap: float = 0.4 * float(hole["radius"]) * PIXELS_PER_METER
-		if look.length() > look_cap:
-			look = look.normalized() * look_cap
-		target += look
 
-		var cam_pos: Vector2 = pane["cam_pos"]
-		cam_pos = cam_pos.lerp(target, blend)
-		pane["cam_pos"] = cam_pos
-		cam.position = cam_pos
-
-		var sv: SubViewport = pane["viewport"]
-		var pane_size := Vector2(sv.size)
-		var desired_zoom: float = _desired_zoom(float(hole["radius"]), pane_size)
-		var cam_zoom: float = lerpf(float(pane["cam_zoom"]), desired_zoom, blend)
-		pane["cam_zoom"] = cam_zoom
-		cam.zoom = Vector2(cam_zoom, cam_zoom)
+		if bool(pane.get("is_3d", false)):
+			_update_camera_3d(pane, hole, blend)
+		else:
+			_update_camera_2d(pane, hole, blend)
 
 		var score_l: Label = pane["score_label"]
 		var radius_l: Label = pane["radius_label"]
@@ -639,19 +782,63 @@ func _update_cameras(dt: float) -> void:
 		]
 
 
+func _update_camera_2d(pane: Dictionary, hole: Dictionary, blend: float) -> void:
+	var cam: Camera2D = pane["camera"]
+	var target := Vector2(float(hole["x"]), float(hole["y"])) * PIXELS_PER_METER
+	var vel := Vector2(float(hole["vx"]), float(hole["vy"])) * PIXELS_PER_METER
+	var look := vel * 0.15
+	var look_cap: float = 0.4 * float(hole["radius"]) * PIXELS_PER_METER
+	if look.length() > look_cap:
+		look = look.normalized() * look_cap
+	target += look
+
+	var cam_pos: Vector2 = pane["cam_pos"]
+	cam_pos = cam_pos.lerp(target, blend)
+	pane["cam_pos"] = cam_pos
+	cam.position = cam_pos
+
+	var sv: SubViewport = pane["viewport"]
+	var pane_size := Vector2(sv.size)
+	var desired_zoom: float = _desired_zoom(float(hole["radius"]), pane_size)
+	var cam_zoom: float = lerpf(float(pane["cam_zoom"]), desired_zoom, blend)
+	pane["cam_zoom"] = cam_zoom
+	cam.zoom = Vector2(cam_zoom, cam_zoom)
+
+
+func _update_camera_3d(pane: Dictionary, hole: Dictionary, blend: float) -> void:
+	var cam: Camera3D = pane["camera"]
+	var look := Vector3(float(hole["x"]), 0.0, float(hole["y"]))
+	var vel := Vector3(float(hole["vx"]), 0.0, float(hole["vy"]))
+	var lead := vel * 0.15
+	var lead_cap: float = 0.4 * float(hole["radius"])
+	if lead.length() > lead_cap:
+		lead = lead.normalized() * lead_cap
+	look += lead
+
+	var cam_pos: Vector3 = pane["cam_pos"]
+	cam_pos = cam_pos.lerp(look, blend)
+	pane["cam_pos"] = cam_pos
+	var radius_s: float = lerpf(float(pane["cam_zoom"]), float(hole["radius"]), blend)
+	pane["cam_zoom"] = radius_s
+	_place_camera_3d(cam, cam_pos, radius_s)
+
+
 func _update_hud() -> void:
 	if _screen != Screen.PLAYING or sim == null or sim.config == null:
 		return
 	title_label.text = "Munchies — %s" % sim.config.label()
 	mode_line.text = _mode_line_text()
 	# Shared band: mode line only. Per-hole score/radius live in each pane.
-	score_label.text = "Split · %s" % _pane_layout_label(sim.holes.size())
+	if use_3d_view:
+		score_label.text = "3D spike · 1 pane (split deferred) · F3 → 2D"
+	else:
+		score_label.text = "2D split · %s · F3 → 3D" % _pane_layout_label(sim.holes.size())
 	radius_label.text = ""
 	if _paused:
 		hint_label.text = "Paused (all panes) — Esc to resume"
 	elif sim.config.mode == MatchConfig.Mode.UNLIMITED:
 		# Unlimited: no clock, no target, no end card.
-		hint_label.text = "Unlimited sandbox — Esc pause · leave running"
+		hint_label.text = "Unlimited sandbox — Esc pause · F3 view · leave running"
 	elif sim.match_over and not sim.config.has_end_card():
 		hint_label.text = "Unlimited running — Esc pause"
 	else:
@@ -659,7 +846,7 @@ func _update_hud() -> void:
 		for h in sim.holes:
 			if h["alive"]:
 				alive_n += 1
-		hint_label.text = "WASD/arrows (You) · Esc pause all · alive %d/%d" % [alive_n, sim.holes.size()]
+		hint_label.text = "WASD/arrows (You) · Esc pause · F3 view · alive %d/%d" % [alive_n, sim.holes.size()]
 
 
 func _mode_line_text() -> String:
