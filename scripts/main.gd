@@ -69,6 +69,11 @@ func _ready() -> void:
 	pane_host.set_anchors_preset(Control.PRESET_FULL_RECT)
 	pane_host.offset_top = TOP_HUD_BAND
 	split_layer.visible = false
+	# Script owns ↑↓; ItemLists must not also consume ui_up/ui_down via focus.
+	setup_list.focus_mode = Control.FOCUS_NONE
+	slot_list.focus_mode = Control.FOCUS_NONE
+	setup_list.item_clicked.connect(_on_mode_item_clicked)
+	slot_list.item_clicked.connect(_on_slot_item_clicked)
 	_build_setup_list()
 	_refresh_slot_list()
 	_show_setup()
@@ -165,15 +170,31 @@ func _show_setup() -> void:
 
 
 func _apply_setup_focus() -> void:
+	## Keep both lists FOCUS_NONE so only `_process_setup` handles ↑↓.
+	## Visual focus is selection + the ▸ mark / hint text — never grab_focus.
+	setup_list.focus_mode = Control.FOCUS_NONE
+	slot_list.focus_mode = Control.FOCUS_NONE
 	if _setup_focus == SetupFocus.MODES:
-		setup_list.grab_focus()
 		setup_list.select(_mode_index)
+		setup_list.ensure_current_is_visible()
 		slot_list.deselect_all()
 	else:
-		slot_list.grab_focus()
 		_slot_cursor = clampi(_slot_cursor, 0, 3)
 		slot_list.select(_slot_cursor)
+		slot_list.ensure_current_is_visible()
 	_refresh_slot_list()
+
+
+func _on_mode_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
+	_mode_index = clampi(index, 0, MODE_ORDER.size() - 1)
+	_setup_focus = SetupFocus.MODES
+	_apply_setup_focus()
+
+
+func _on_slot_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
+	_slot_cursor = clampi(index, 0, 3)
+	_setup_focus = SetupFocus.SLOTS
+	_apply_setup_focus()
 
 
 func _make_config_from_setup() -> MatchConfig:
@@ -247,14 +268,23 @@ func _process_setup() -> void:
 		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
 			_mode_index = (_mode_index - 1 + MODE_ORDER.size()) % MODE_ORDER.size()
 			setup_list.select(_mode_index)
-		if Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
-			_mode_index = (_mode_index + 1) % MODE_ORDER.size()
-			setup_list.select(_mode_index)
+		elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+			# Edge: leave modes into slots instead of wrapping + dual-list scroll.
+			if _mode_index >= MODE_ORDER.size() - 1:
+				_setup_focus = SetupFocus.SLOTS
+				_apply_setup_focus()
+			else:
+				_mode_index += 1
+				setup_list.select(_mode_index)
 	else:
 		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
-			_slot_cursor = (_slot_cursor - 1 + 4) % 4
-			_refresh_slot_list()
-		if Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+			if _slot_cursor <= 0:
+				_setup_focus = SetupFocus.MODES
+				_apply_setup_focus()
+			else:
+				_slot_cursor -= 1
+				_refresh_slot_list()
+		elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
 			_slot_cursor = (_slot_cursor + 1) % 4
 			_refresh_slot_list()
 		if Input.is_action_just_pressed("ui_left") or Input.is_action_just_pressed("move_left") \

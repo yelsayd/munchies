@@ -111,6 +111,7 @@ horizontal_alignment = 1
 [node name="ModeList" type="ItemList" parent="HUD/Setup/Margin/VBox"]
 custom_minimum_size = Vector2(0, 150)
 layout_mode = 2
+focus_mode = 0
 allow_reselect = true
 auto_height = true
 item_count = 0
@@ -124,6 +125,7 @@ horizontal_alignment = 1
 [node name="SlotList" type="ItemList" parent="HUD/Setup/Margin/VBox"]
 custom_minimum_size = Vector2(0, 120)
 layout_mode = 2
+focus_mode = 0
 allow_reselect = true
 auto_height = true
 item_count = 0
