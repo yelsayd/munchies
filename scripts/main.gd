@@ -319,7 +319,8 @@ func _collect_inputs() -> Dictionary:
 
 
 func _read_keyboard_input() -> Vector2:
-	# Combine WASD + arrows into one vector, then normalize so diagonals match full tilt.
+	# WASD/arrows make a 2D stick. Holding W+D is (1,1), length √2 ≈ 1.41.
+	# Normalize when longer than 1 so diagonal speed matches full tilt, not faster.
 	var v := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	if v.length_squared() > 1.0:
 		v = v.normalized()
@@ -562,6 +563,8 @@ func _sync_pane_sizes() -> void:
 
 
 func _desired_zoom(radius: float, pane_size: Vector2) -> float:
+	# Aim for the hole's diameter to fill about 20% of the shorter pane side.
+	# Example: pane 360 px tall → hole draws ~72 px across (0.20 × 360).
 	var shorter: float = minf(pane_size.x, pane_size.y)
 	if shorter < 1.0:
 		shorter = 360.0

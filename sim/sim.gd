@@ -5,12 +5,17 @@ extends RefCounted
 
 const START_RADIUS := 1.0
 const START_MASS := 1.0
+# Score is just mass × 10, then rounded.
+# Example: mass 1.0 → score 10; mass 2.5 → score 25.
 const SCORE_SCALE := 10.0
 
 const SPEED_BASE := 14.0
 const SPEED_FLOOR := 0.32
 const STEER_TAU := 0.15
 
+# You can eat a prop only if it is a bit smaller than you.
+# Gate: prop.radius ≤ hole.radius × 0.95 (not quite equal size).
+# Example: hole radius 2.0 can eat props up to 1.9.
 const PROP_EAT_RATIO := 0.95
 const PROP_SUCTION_MULT := 2.0
 const PROP_CONSUME_MULT := 0.45
@@ -369,6 +374,9 @@ func step(inputs_by_hole: Dictionary, dt: float) -> Array:
 
 func _steer_hole(hole: Dictionary, input: Vector2, dt: float) -> void:
 	var radius: float = float(hole["radius"])
+	# Bigger hole → slower top speed (start radius / your radius).
+	# At radius 1 you get full SPEED_BASE; at radius 2 you go half as fast.
+	# Never slower than SPEED_FLOOR (0.32×), so huge holes still crawl.
 	var speed: float = SPEED_BASE * clampf(START_RADIUS / radius, SPEED_FLOOR, 1.0)
 	var desired := Vector2.ZERO
 	var mag: float = input.length()
