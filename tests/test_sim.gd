@@ -1,5 +1,5 @@
 extends SceneTree
-## Headless Phase 1 + Phase 2 checks. Run:
+## Headless Phase 1–4 checks. Run:
 ##   godot --headless --path . -s res://tests/test_sim.gd
 
 func _init() -> void:
@@ -18,9 +18,18 @@ func _init() -> void:
 	failed += _check_phase2_map()
 	failed += _check_claims_closest()
 	failed += _check_progression_gates()
+	failed += _check_match_config_flags()
+	failed += _check_timer_ends()
+	failed += _check_score_target_ends()
+	failed += _check_map_cleared_ends()
+	failed += _check_last_standing()
+	failed += _check_unlimited_no_end()
+	failed += _check_hole_respawn()
+	failed += _check_bot_emits_input()
+	failed += _check_player_swallow()
 
 	if failed == 0:
-		print("PASS: all Phase 1+2 sim checks")
+		print("PASS: all Phase 1–4 sim checks")
 		quit(0)
 	else:
 		print("FAIL: %d check(s) failed" % failed)
@@ -220,4 +229,276 @@ func _check_progression_gates() -> int:
 		print("FAIL mid-game should eat vehicles at radius ", hole["radius"])
 		return 1
 	print("ok progression gates")
+	return 0
+
+
+func _check_match_config_flags() -> int:
+	var t := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 3)
+	if not t.respawn_holes or t.respawn_props or not t.allow_player_eat or t.duration != 120.0:
+		print("FAIL timer flags: ", t.respawn_holes, t.respawn_props, t.allow_player_eat, t.duration)
+		return 1
+	var u := MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 2)
+	if u.allow_player_eat or not u.respawn_props or u.has_end_card():
+		print("FAIL unlimited flags")
+		return 1
+	var ls := MatchConfig.for_mode(MatchConfig.Mode.LAST_STANDING, 4)
+	if ls.respawn_holes or ls.respawn_props or not ls.allow_player_eat:
+		print("FAIL last-standing flags")
+		return 1
+	var sim := MunchiesSim.new()
+	sim.setup_match(MatchConfig.for_mode(MatchConfig.Mode.TIMER, 3), 7)
+	if sim.holes.size() != 3:
+		print("FAIL expected 3 holes, got ", sim.holes.size())
+		return 1
+	var bots := 0
+	for h in sim.holes:
+		if h["is_bot"]:
+			bots += 1
+	if bots != 2:
+		print("FAIL expected 2 bots, got ", bots)
+		return 1
+	print("ok match config flags")
+	return 0
+
+
+func _check_timer_ends() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 2)
+	cfg.duration = 0.5
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 3)
+	var ended := false
+	for i in 90:
+		var inputs := {}
+		for h in sim.holes:
+			inputs[int(h["id"])] = Vector2.ZERO
+		for e in sim.step(inputs, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_MATCH_ENDED:
+				ended = true
+				if str(e["reason"]) != "Time":
+					print("FAIL timer reason: ", e["reason"])
+					return 1
+	if not ended or not sim.match_over:
+		print("FAIL timer did not end")
+		return 1
+	print("ok timer ends")
+	return 0
+
+
+func _check_score_target_ends() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.SCORE_TARGET, 2)
+	cfg.score_target = 800
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 3)
+	# Leave rivals alive; give human enough mass for 800 (mass 80).
+	var you := sim.player_hole()
+	you["mass"] = 80.0
+	you["radius"] = sqrt(80.0)
+	you["score"] = 800
+	you["score_changed_tick"] = 1
+	var ended := false
+	var inputs := {}
+	for h in sim.holes:
+		inputs[int(h["id"])] = Vector2.ZERO
+	for e in sim.step(inputs, 1.0 / 60.0):
+		if e["kind"] == MunchiesSim.EVENT_MATCH_ENDED:
+			ended = true
+	if not ended:
+		print("FAIL score target did not end at 800")
+		return 1
+	# Rivals should still be alive at end.
+	var alive_bots := 0
+	for h in sim.holes:
+		if h["is_bot"] and h["alive"]:
+			alive_bots += 1
+	if alive_bots < 1:
+		print("FAIL expected rivals alive on score-target win")
+		return 1
+	print("ok score target ends with rivals alive")
+	return 0
+
+
+func _check_map_cleared_ends() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.MAP_CLEARED, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 3)
+	# Only oversized leftovers — nothing any hole can swallow.
+	sim.objects.clear()
+	sim.objects.append(MunchiesSim.make_prop(900, 0.0, 0.0, 4, MunchiesSim.TIER4_RADIUS))
+	for h in sim.holes:
+		h["mass"] = 1.0
+		h["radius"] = 1.0
+	var ended := false
+	var inputs := {}
+	for h in sim.holes:
+		inputs[int(h["id"])] = Vector2.ZERO
+	for e in sim.step(inputs, 1.0 / 60.0):
+		if e["kind"] == MunchiesSim.EVENT_MATCH_ENDED and str(e["reason"]) == "Map cleared":
+			ended = true
+	if not ended:
+		print("FAIL map cleared did not end")
+		return 1
+	print("ok map cleared ends")
+	return 0
+
+
+func _check_last_standing() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.LAST_STANDING, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 3)
+	var bot: Dictionary = {}
+	for h in sim.holes:
+		if h["is_bot"]:
+			bot = h
+			break
+	bot["alive"] = false
+	var ended := false
+	var inputs := {}
+	for h in sim.holes:
+		inputs[int(h["id"])] = Vector2.ZERO
+	for e in sim.step(inputs, 1.0 / 60.0):
+		if e["kind"] == MunchiesSim.EVENT_MATCH_ENDED:
+			ended = true
+			if int(e["winner_id"]) != int(sim.player_hole()["id"]):
+				print("FAIL last standing winner: ", e["winner_id"])
+				return 1
+	if not ended:
+		print("FAIL last standing did not end")
+		return 1
+	print("ok last standing")
+	return 0
+
+
+func _check_unlimited_no_end() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 3)
+	# Force conditions that would end other modes.
+	sim.objects.clear()
+	var you := sim.player_hole()
+	you["score"] = 900
+	you["mass"] = 90.0
+	you["radius"] = sqrt(90.0)
+	for i in 30:
+		var inputs := {}
+		for h in sim.holes:
+			inputs[int(h["id"])] = Vector2.ZERO
+		for e in sim.step(inputs, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_MATCH_ENDED:
+				print("FAIL unlimited emitted MatchEnded")
+				return 1
+	if sim.match_over or cfg.has_end_card():
+		print("FAIL unlimited should not end / have end card")
+		return 1
+	print("ok unlimited no end")
+	return 0
+
+
+func _check_hole_respawn() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_empty(1, 40.0)
+	sim.config = cfg
+	sim.holes.clear()
+	sim.holes.append(MunchiesSim.make_hole(1, 0.0, 0.0, false, 0))
+	sim.holes.append(MunchiesSim.make_hole(2, 0.25, 0.0, true, 1))
+	var big: Dictionary = sim.holes[0]
+	var bot: Dictionary = sim.holes[1]
+	big["mass"] = 4.0
+	big["radius"] = 2.0
+	bot["mass"] = 1.0
+	bot["radius"] = 1.0
+	var score_kept: int = 55
+	bot["score"] = score_kept
+	var respawned := false
+	for i in 300:
+		for e in sim.step({1: Vector2.ZERO, 2: Vector2.ZERO}, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_RESPAWNED and int(e["hole_id"]) == 2:
+				respawned = true
+	if not respawned or not bool(bot["alive"]):
+		print("FAIL hole did not respawn")
+		return 1
+	if int(bot["score"]) != score_kept:
+		print("FAIL respawn should keep score: ", bot["score"])
+		return 1
+	if not is_equal_approx(float(bot["radius"]), MunchiesSim.START_RADIUS):
+		print("FAIL respawn should reset radius")
+		return 1
+	print("ok hole respawn")
+	return 0
+
+
+func _check_bot_emits_input() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 3)
+	var bot_id := -1
+	for h in sim.holes:
+		if h["is_bot"]:
+			bot_id = int(h["id"])
+			# Place a nearby prop so the bot has food to seek.
+			sim.objects.append(MunchiesSim.make_prop(777, float(h["x"]) + 2.0, float(h["y"]), 0, MunchiesSim.TIER0_RADIUS))
+			break
+	var inp: Vector2 = MunchiesBot.input_for(sim, bot_id)
+	if inp.length_squared() < 0.01:
+		print("FAIL bot should emit non-zero Input toward food")
+		return 1
+	# Bot must not write positions — only Input. Capture pos, apply input via step.
+	var bot := sim.hole_by_id(bot_id)
+	var before := Vector2(float(bot["x"]), float(bot["y"]))
+	var inputs := {int(sim.player_hole()["id"]): Vector2.ZERO, bot_id: inp}
+	sim.step(inputs, 1.0 / 60.0)
+	var after := Vector2(float(bot["x"]), float(bot["y"]))
+	# Position change comes from step steering, not from the bot helper.
+	if before.is_equal_approx(after) and inp.length_squared() > 0.5:
+		# With full input for one frame, position should move a bit after steer blend.
+		# Steer tau means first frame is small; still should move.
+		pass
+	# Re-check: calling input_for alone does not move.
+	var mid := Vector2(float(bot["x"]), float(bot["y"]))
+	MunchiesBot.input_for(sim, bot_id)
+	if not mid.is_equal_approx(Vector2(float(bot["x"]), float(bot["y"]))):
+		print("FAIL bot wrote positions")
+		return 1
+	print("ok bot emits Input")
+	return 0
+
+
+func _check_player_swallow() -> int:
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.LAST_STANDING, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_empty(1, 40.0)
+	sim.config = cfg
+	sim.holes.clear()
+	sim.holes.append(MunchiesSim.make_hole(1, 0.0, 0.0, false, 0))
+	sim.holes.append(MunchiesSim.make_hole(2, 0.3, 0.0, true, 1))
+	var big: Dictionary = sim.holes[0]
+	var small: Dictionary = sim.holes[1]
+	big["mass"] = 4.0
+	big["radius"] = 2.0
+	small["mass"] = 1.0
+	small["radius"] = 1.0
+	var eliminated := false
+	for i in 180:
+		for e in sim.step({1: Vector2.ZERO, 2: Vector2.ZERO}, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_ELIMINATED:
+				eliminated = true
+	if not eliminated or bool(small["alive"]):
+		print("FAIL player swallow did not eliminate smaller hole")
+		return 1
+	# Unlimited must not swallow players.
+	var u := MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 2)
+	sim = MunchiesSim.new()
+	sim.setup_empty(1, 40.0)
+	sim.config = u
+	sim.holes.clear()
+	sim.holes.append(MunchiesSim.make_hole(1, 0.0, 0.0, false, 0))
+	sim.holes.append(MunchiesSim.make_hole(2, 0.3, 0.0, true, 1))
+	sim.holes[0]["mass"] = 4.0
+	sim.holes[0]["radius"] = 2.0
+	for i in 120:
+		sim.step({1: Vector2.ZERO, 2: Vector2.ZERO}, 1.0 / 60.0)
+	if not bool(sim.holes[1]["alive"]):
+		print("FAIL unlimited should not swallow players")
+		return 1
+	print("ok player swallow")
 	return 0

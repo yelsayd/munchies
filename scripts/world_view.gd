@@ -1,6 +1,6 @@
 extends Node2D
-## Draws the Phase 2 map: ground, parks, roads, props (large→small), hole on top.
-## Too-big props stay under the hole and never block movement (sim owns that).
+## Draws the map: ground, parks, roads, props (large→small), all holes on top.
+## Too-big props stay under holes and never block movement (sim owns that).
 
 const PIXELS_PER_METER := 24.0
 
@@ -18,7 +18,7 @@ const TIER_COLORS := {
 
 func _draw() -> void:
 	var sim: MunchiesSim = main.sim as MunchiesSim
-	if sim == null:
+	if sim == null or sim.holes.is_empty():
 		return
 
 	var half: float = sim.map_half * PIXELS_PER_METER
@@ -50,7 +50,7 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2(-half, -half), Vector2(half * 2.0, half * 2.0)), Color(0.35, 0.42, 0.38), false, 4.0)
 
 	# Props large → small so litter reads on top of buildings when overlapping.
-	# Hole draws after this, so too-big props sit under the hole.
+	# Holes draw after this, so too-big props sit under holes.
 	var props: Array = sim.objects.duplicate()
 	props.sort_custom(func(a: Variant, b: Variant) -> bool:
 		return float((a as Dictionary)["radius"]) > float((b as Dictionary)["radius"])
@@ -76,17 +76,32 @@ func _draw() -> void:
 		col.a = float(t["scale"])
 		_draw_tier_shape(int(t["tier"]), pos, r, col)
 
-	# Hole on top
-	var hole: Dictionary = sim.player_hole()
-	var hpos := Vector2(float(hole["x"]), float(hole["y"])) * PIXELS_PER_METER
-	var hr: float = float(hole["radius"]) * PIXELS_PER_METER
-	draw_circle(hpos, hr, Color(0.04, 0.04, 0.05))
-	draw_arc(hpos, hr, 0.0, TAU, 64, main.hole_ring_color, 3.0, true)
+	# All holes (alive) on top; dead holes are invisible until respawn.
+	for hole_v in sim.holes:
+		var hole: Dictionary = hole_v
+		if not bool(hole["alive"]):
+			continue
+		var hpos := Vector2(float(hole["x"]), float(hole["y"])) * PIXELS_PER_METER
+		var hr: float = float(hole["radius"]) * PIXELS_PER_METER
+		var slot: int = int(hole.get("slot", 0))
+		var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
+		draw_circle(hpos, hr, Color(0.04, 0.04, 0.05))
+		draw_arc(hpos, hr, 0.0, TAU, 64, ring, 3.0, true)
+		# Name label above hole.
+		var label: String = str(hole.get("name", ""))
+		draw_string(
+			ThemeDB.fallback_font,
+			hpos + Vector2(-24, -hr - 10),
+			label,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1,
+			14,
+			ring
+		)
 
-	# One-frame (short) white ring when mass is added.
-	if main.swallow_flash > 0.0:
-		var flash_a: float = clampf(main.swallow_flash / 0.18, 0.0, 1.0)
-		draw_arc(hpos, hr + 4.0, 0.0, TAU, 64, Color(1, 1, 1, flash_a), 3.5, true)
+		if main.swallow_flash > 0.0 and int(hole["id"]) == int(main.swallow_flash_hole):
+			var flash_a: float = clampf(main.swallow_flash / 0.18, 0.0, 1.0)
+			draw_arc(hpos, hr + 4.0, 0.0, TAU, 64, Color(1, 1, 1, flash_a), 3.5, true)
 
 
 func _draw_tier_shape(tier: int, pos: Vector2, r: float, col: Color) -> void:
