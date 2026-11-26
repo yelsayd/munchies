@@ -1,7 +1,7 @@
 class_name MunchiesSim
 extends RefCounted
 ## Pure simulation for Munchies. No scene tree, no physics nodes.
-## Phase 4: MatchConfig modes, 2–4 holes, player swallow, respawn, match end.
+## Phase 5 couch: same step for all panes; claims exclusive; modes own respawn/elim.
 
 const START_RADIUS := 1.0
 const START_MASS := 1.0
@@ -196,15 +196,24 @@ func _layout_phase2_map(world_seed: int) -> void:
 		Rect2(35, 20, 10, 40),
 	]
 
-	# --- Tier 0 litter (140): packed in parks so every spawn can eat within a second ---
+	# --- Tier 0 litter: parks + dense rings/trails at every spawn so the inward path reads ---
 	_scatter_props(0, TIER0_RADIUS, 55, Vector2(0, 0), 16.0, 3.0)
 	_scatter_props(0, TIER0_RADIUS, 42, Vector2(28, -22), 12.0, 2.0)
 	_scatter_props(0, TIER0_RADIUS, 43, Vector2(-30, 24), 12.0, 2.0)
-	# Trail of litter from each spawn inward so early game is never empty.
-	_scatter_along_line(0, TIER0_RADIUS, 12, Vector2(-55, -55), Vector2(-20, -20))
-	_scatter_along_line(0, TIER0_RADIUS, 12, Vector2(55, -55), Vector2(20, -20))
-	_scatter_along_line(0, TIER0_RADIUS, 12, Vector2(-55, 55), Vector2(-20, 20))
-	_scatter_along_line(0, TIER0_RADIUS, 12, Vector2(55, 55), Vector2(20, 20))
+	# Dense litter around each corner spawn (pad clear runs after); food direction is obvious.
+	for pad_v in SPAWN_PADS:
+		var pad: Vector2 = pad_v
+		_scatter_props(0, TIER0_RADIUS, 22, pad, 11.0, 0.0)
+	# Thick trails from each spawn toward the center parks.
+	_scatter_along_line(0, TIER0_RADIUS, 22, Vector2(-55, -55), Vector2(-18, -18))
+	_scatter_along_line(0, TIER0_RADIUS, 22, Vector2(55, -55), Vector2(18, -18))
+	_scatter_along_line(0, TIER0_RADIUS, 22, Vector2(-55, 55), Vector2(-18, 18))
+	_scatter_along_line(0, TIER0_RADIUS, 22, Vector2(55, 55), Vector2(18, 18))
+	# A second offset trail so the corridor reads even after a few swallows.
+	_scatter_along_line(0, TIER0_RADIUS, 10, Vector2(-52, -58), Vector2(-22, -16))
+	_scatter_along_line(0, TIER0_RADIUS, 10, Vector2(58, -52), Vector2(16, -22))
+	_scatter_along_line(0, TIER0_RADIUS, 10, Vector2(-58, 52), Vector2(-16, 22))
+	_scatter_along_line(0, TIER0_RADIUS, 10, Vector2(52, 58), Vector2(22, 16))
 
 	# --- Tier 1 street props (70): parks + near roads ---
 	_scatter_props(1, TIER1_RADIUS, 22, Vector2(0, 0), 20.0, 4.0)

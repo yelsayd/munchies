@@ -1,6 +1,7 @@
 extends Node2D
 ## Draws the map: ground, parks, roads, props (large→small), all holes on top.
 ## Too-big props stay under holes and never block movement (sim owns that).
+## Shared across split-screen panes via one World2D — every pane sees the same swallow.
 
 const PIXELS_PER_METER := 24.0
 
@@ -13,11 +14,14 @@ const TIER_COLORS := {
 	4: Color(0.40, 0.38, 0.42),
 }
 
-@onready var main: Node2D = get_parent()
+## Set by main.gd (World may live under a SubViewport, not under Main).
+var host: Node = null
 
 
 func _draw() -> void:
-	var sim: MunchiesSim = main.sim as MunchiesSim
+	if host == null:
+		return
+	var sim: MunchiesSim = host.sim as MunchiesSim
 	if sim == null or sim.holes.is_empty():
 		return
 
@@ -64,9 +68,19 @@ func _draw() -> void:
 		var tier: int = int(prop["tier"])
 		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
 		_draw_tier_shape(tier, pos, r, col)
+		# Contested / claimed: only the claiming hole owns the prop — ring in that hole's color.
+		var claimed: int = int(prop.get("claimed_by", -1))
+		if claimed != -1:
+			var claimer: Dictionary = sim.hole_by_id(claimed)
+			if not claimer.is_empty():
+				var slot: int = int(claimer.get("slot", 0))
+				var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
+				ring.a = 0.85
+				draw_arc(pos, r + 3.0, 0.0, TAU, 24, ring, 2.0, true)
 
 	# Active swallow tweens (presentation only; sim already removed the prop).
-	for tw in main.swallow_tweens:
+	# Every pane shares this World2D, so both sides see the same swallow.
+	for tw in host.swallow_tweens:
 		var t: Dictionary = tw
 		var pos := Vector2(float(t["x"]), float(t["y"])) * PIXELS_PER_METER
 		var r: float = float(t["radius"]) * float(t["scale"]) * PIXELS_PER_METER
@@ -99,8 +113,8 @@ func _draw() -> void:
 			ring
 		)
 
-		if main.swallow_flash > 0.0 and int(hole["id"]) == int(main.swallow_flash_hole):
-			var flash_a: float = clampf(main.swallow_flash / 0.18, 0.0, 1.0)
+		if host.swallow_flash > 0.0 and int(hole["id"]) == int(host.swallow_flash_hole):
+			var flash_a: float = clampf(host.swallow_flash / 0.18, 0.0, 1.0)
 			draw_arc(hpos, hr + 4.0, 0.0, TAU, 64, Color(1, 1, 1, flash_a), 3.5, true)
 
 

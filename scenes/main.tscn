@@ -7,18 +7,29 @@
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
+[node name="WorldHold" type="Node2D" parent="."]
+
 [node name="World" type="Node2D" parent="."]
 script = ExtResource("2_world")
-
-[node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(0, 0)
-zoom = Vector2(1, 1)
 
 [node name="BlipPlayer" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("3_blip")
 volume_db = -6.0
 
+[node name="SplitLayer" type="CanvasLayer" parent="."]
+layer = 0
+visible = false
+
+[node name="PaneHost" type="Control" parent="SplitLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
 [node name="HUD" type="CanvasLayer" parent="."]
+layer = 1
 
 [node name="Margin" type="MarginContainer" parent="HUD"]
 anchors_preset = 15
@@ -28,43 +39,43 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 24
-theme_override_constants/margin_top = 20
+theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 24
-theme_override_constants/margin_bottom = 20
+theme_override_constants/margin_bottom = 12
 
 [node name="VBox" type="VBoxContainer" parent="HUD/Margin"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 
 [node name="Title" type="Label" parent="HUD/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 1)
-theme_override_font_sizes/font_size = 22
-text = "Munchies — Phase 4"
+theme_override_font_sizes/font_size = 20
+text = "Munchies — Phase 5"
 
 [node name="ModeLine" type="Label" parent="HUD/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.90, 0.78, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 text = "Pick a match mode"
 
 [node name="Score" type="Label" parent="HUD/Margin/VBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.95, 0.92, 1)
-theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(0.75, 0.82, 0.78, 1)
+theme_override_font_sizes/font_size = 14
 text = ""
 
 [node name="Radius" type="Label" parent="HUD/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.88, 0.82, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 14
 text = ""
 
 [node name="Hint" type="Label" parent="HUD/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.72, 0.68, 1)
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 13
 text = ""
 
 [node name="Setup" type="PanelContainer" parent="HUD"]
@@ -73,10 +84,10 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -240.0
-offset_top = -200.0
-offset_right = 240.0
-offset_bottom = 200.0
+offset_left = -260.0
+offset_top = -210.0
+offset_right = 260.0
+offset_bottom = 210.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -107,7 +118,7 @@ item_count = 0
 [node name="HoleCount" type="Label" parent="HUD/Setup/Margin/VBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
-text = "Holes: 2  (1 keyboard + 1 bot)"
+text = "Holes: 2  ·  panes: 2 side-by-side"
 horizontal_alignment = 1
 
 [node name="SetupHint" type="Label" parent="HUD/Setup/Margin/VBox"]

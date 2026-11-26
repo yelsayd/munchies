@@ -1,5 +1,5 @@
 extends SceneTree
-## Headless Phase 1–4 checks. Run:
+## Headless Phase 1–5 checks. Run:
 ##   godot --headless --path . -s res://tests/test_sim.gd
 
 func _init() -> void:
@@ -16,7 +16,9 @@ func _init() -> void:
 	failed += _check_slowdown()
 	failed += _check_map_clamp()
 	failed += _check_phase2_map()
+	failed += _check_spawn_food_nearby()
 	failed += _check_claims_closest()
+	failed += _check_claim_sticks_on_contest()
 	failed += _check_progression_gates()
 	failed += _check_match_config_flags()
 	failed += _check_timer_ends()
@@ -29,7 +31,7 @@ func _init() -> void:
 	failed += _check_player_swallow()
 
 	if failed == 0:
-		print("PASS: all Phase 1–4 sim checks")
+		print("PASS: all Phase 1–5 sim checks")
 		quit(0)
 	else:
 		print("FAIL: %d check(s) failed" % failed)
@@ -199,6 +201,50 @@ func _check_claims_closest() -> int:
 		print("FAIL claim expected hole 2, got ", prop["claimed_by"], " events=", events.size())
 		return 1
 	print("ok claims closest")
+	return 0
+
+
+func _check_claim_sticks_on_contest() -> int:
+	## Only the claiming hole keeps a contested prop while still in suction.
+	var sim := MunchiesSim.new()
+	sim.setup_empty(1, 40.0)
+	sim.holes.clear()
+	sim.holes.append(MunchiesSim.make_hole(1, 0.0, 0.0, false, 0))
+	sim.holes.append(MunchiesSim.make_hole(2, 3.5, 0.0, true, 1))
+	sim.objects.append(MunchiesSim.make_prop(10, 1.2, 0.0, 0, MunchiesSim.TIER0_RADIUS))
+	sim.step({1: Vector2.ZERO, 2: Vector2.ZERO}, 1.0 / 60.0)
+	var prop: Dictionary = sim.objects[0]
+	if int(prop["claimed_by"]) != 1:
+		print("FAIL contest setup: expected claim by hole 1, got ", prop["claimed_by"])
+		return 1
+	# Move hole 2 closer than hole 1; claim must stick with 1 while 1 still sucks.
+	sim.holes[1]["x"] = 1.5
+	sim.step({1: Vector2.ZERO, 2: Vector2.ZERO}, 1.0 / 60.0)
+	if int(prop["claimed_by"]) != 1:
+		print("FAIL contested prop stolen by closer hole; claimed_by=", prop["claimed_by"])
+		return 1
+	print("ok claim sticks on contest")
+	return 0
+
+
+func _check_spawn_food_nearby() -> int:
+	## Corner spawns should see dense litter just outside the pad clear so food direction is obvious.
+	var sim := MunchiesSim.new()
+	sim.setup_match(MatchConfig.for_mode(MatchConfig.Mode.TIMER, 2), 42)
+	for pad_v in MunchiesSim.SPAWN_PADS:
+		var pad: Vector2 = pad_v
+		var near := 0
+		for prop_v in sim.objects:
+			var prop: Dictionary = prop_v
+			if not bool(prop["alive"]) or int(prop["tier"]) != 0:
+				continue
+			var p := Vector2(float(prop["x"]), float(prop["y"]))
+			if p.distance_to(pad) < 14.0:
+				near += 1
+		if near < 12:
+			print("FAIL spawn food too sparse at ", pad, " near=", near)
+			return 1
+	print("ok spawn food nearby")
 	return 0
 
 
