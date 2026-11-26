@@ -1,7 +1,7 @@
 class_name MunchiesSim
 extends RefCounted
 ## Pure simulation for Munchies. No scene tree, no physics nodes.
-## Phase 5 couch: same step for all panes; claims exclusive; modes own respawn/elim.
+## Phase 6 couch: setup slots → same step for all panes; claims exclusive; modes own respawn/elim.
 
 const START_RADIUS := 1.0
 const START_MASS := 1.0
@@ -152,14 +152,24 @@ func setup_phase2(world_seed: int = 42, spawn_pad: int = 0) -> void:
 	holes.append(make_hole(_alloc_id(), pad.x, pad.y, false, 0))
 
 
-## Phase 4: match with 2–4 holes (slot 0 human, extras bots).
+## Phase 6: match from setup slots (keyboard / bot / empty). Pads deferred.
 func setup_match(cfg: MatchConfig, world_seed: int = 42) -> void:
 	config = cfg
 	_layout_phase2_map(world_seed)
-	var n: int = clampi(cfg.hole_count, 2, 4)
-	for i in n:
-		var pad: Vector2 = SPAWN_PADS[i]
-		holes.append(make_hole(_alloc_id(), pad.x, pad.y, i > 0, i))
+	var kinds: PackedStringArray = cfg.slots
+	if kinds.is_empty():
+		kinds = MatchConfig.default_slots(clampi(cfg.hole_count, 1, 4))
+	for slot_i in mini(4, kinds.size()):
+		var kind: String = str(kinds[slot_i])
+		if kind == MatchConfig.SLOT_EMPTY:
+			continue
+		var pad: Vector2 = SPAWN_PADS[slot_i]
+		var is_bot: bool = kind == MatchConfig.SLOT_BOT
+		holes.append(make_hole(_alloc_id(), pad.x, pad.y, is_bot, slot_i))
+	if holes.is_empty():
+		# Safety: always at least the keyboard hole.
+		var pad0: Vector2 = SPAWN_PADS[0]
+		holes.append(make_hole(_alloc_id(), pad0.x, pad0.y, false, 0))
 
 
 func _layout_phase2_map(world_seed: int) -> void:

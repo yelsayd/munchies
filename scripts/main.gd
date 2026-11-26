@@ -1,7 +1,7 @@
 extends Node2D
-## Phase 5 view: couch split-screen. Slot 0 = keyboard; extras = bots via Input.
-## One sim; each pane follows its hole with Phase 2 camera rules. Esc pauses all.
-## Gamepads deferred — empty slots stay bots until pads exist.
+## Phase 6 view: setup (modes + slot list + optional bots) → couch split-screen.
+## Slot 0 = keyboard; other filled slots = bots until pads exist. Esc pauses all.
+## Unlimited never shows a clock or score target. Shared end card for ending modes.
 
 const PIXELS_PER_METER := 24.0
 const CAMERA_SETTLE := 0.2
@@ -11,6 +11,7 @@ const PANE_GAP := 3.0
 const TOP_HUD_BAND := 72.0
 
 enum Screen { SETUP, PLAYING, ENDED }
+enum SetupFocus { MODES, SLOTS }
 
 @onready var world: Node2D = $World
 @onready var world_hold: Node2D = $WorldHold
@@ -23,7 +24,8 @@ enum Screen { SETUP, PLAYING, ENDED }
 @onready var hint_label: Label = $HUD/Margin/VBox/Hint
 @onready var setup_panel: PanelContainer = $HUD/Setup
 @onready var setup_list: ItemList = $HUD/Setup/Margin/VBox/ModeList
-@onready var setup_holes: Label = $HUD/Setup/Margin/VBox/HoleCount
+@onready var slot_list: ItemList = $HUD/Setup/Margin/VBox/SlotList
+@onready var setup_summary: Label = $HUD/Setup/Margin/VBox/SlotSummary
 @onready var setup_hint: Label = $HUD/Setup/Margin/VBox/SetupHint
 @onready var end_panel: PanelContainer = $HUD/EndCard
 @onready var end_title: Label = $HUD/EndCard/Margin/VBox/EndTitle
@@ -36,7 +38,10 @@ var sim: MunchiesSim
 var _paused := false
 var _screen: Screen = Screen.SETUP
 var _mode_index: int = 0 ## Timer highlighted by default
-var _hole_count: int = 2
+var _setup_focus: SetupFocus = SetupFocus.MODES
+var _slot_cursor: int = 1
+## Four setup slots. Slot 0 is always keyboard when filled.
+var _slots: PackedStringArray = MatchConfig.default_slots(4)
 
 ## Presentation-only swallow ghosts: {x,y,radius,tier,scale,age,target_x,target_y,hole_id}
 var swallow_tweens: Array = []
@@ -65,13 +70,14 @@ func _ready() -> void:
 	pane_host.offset_top = TOP_HUD_BAND
 	split_layer.visible = false
 	_build_setup_list()
+	_refresh_slot_list()
 	_show_setup()
 
 
 func _build_setup_list() -> void:
 	setup_list.clear()
 	for m in MODE_ORDER:
-		var cfg := MatchConfig.for_mode(m, _hole_count)
+		var cfg := MatchConfig.for_mode(m, 4)
 		var extra := ""
 		match m:
 			MatchConfig.Mode.TIMER:
@@ -83,23 +89,54 @@ func _build_setup_list() -> void:
 			MatchConfig.Mode.LAST_STANDING:
 				extra = " — no hole respawn"
 			MatchConfig.Mode.UNLIMITED:
-				extra = " — no end card"
+				extra = " — sandbox, no clock / target / end card"
 		setup_list.add_item(cfg.label() + extra)
 	setup_list.select(_mode_index)
-	_refresh_setup_holes()
 
 
-func _refresh_setup_holes() -> void:
-	setup_holes.text = "Holes: %d  ·  panes: %s  (slot 0 keyboard, rest bots)" % [
-		_hole_count,
-		_pane_layout_label(_hole_count),
+func _slot_label(index: int) -> String:
+	var kind: String = str(_slots[index])
+	var mark := "▸ " if _setup_focus == SetupFocus.SLOTS and index == _slot_cursor else "  "
+	match kind:
+		MatchConfig.SLOT_KEYBOARD:
+			return "%s%d. You (keyboard)" % [mark, index + 1]
+		MatchConfig.SLOT_BOT:
+			return "%s%d. Bot" % [mark, index + 1]
+		_:
+			return "%s%d. Empty  (optional bot)" % [mark, index + 1]
+
+
+func _refresh_slot_list() -> void:
+	slot_list.clear()
+	for i in 4:
+		slot_list.add_item(_slot_label(i))
+	if _setup_focus == SetupFocus.SLOTS:
+		slot_list.select(_slot_cursor)
+	else:
+		slot_list.deselect_all()
+	var filled := 0
+	var bots := 0
+	for k in _slots:
+		if str(k) == MatchConfig.SLOT_EMPTY:
+			continue
+		filled += 1
+		if str(k) == MatchConfig.SLOT_BOT:
+			bots += 1
+	setup_summary.text = "Filled %d/4 · bots %d · panes: %s  (pads deferred)" % [
+		filled,
+		bots,
+		_pane_layout_label(filled),
 	]
-	setup_hint.text = "↑↓ mode · ←→ holes · Enter/Space start · Esc freezes whole sim in-match"
+	var focus_hint := "modes" if _setup_focus == SetupFocus.MODES else "slots"
+	setup_hint.text = (
+		"Tab: %s · ↑↓ move · ←→ bot/empty on slots 2–4 · Enter start · Esc pauses in-match"
+		% focus_hint
+	)
 
 
 func _pane_layout_label(n: int) -> String:
 	match n:
-		1:
+		0, 1:
 			return "1 fullscreen"
 		2:
 			return "2 side-by-side"
@@ -116,18 +153,40 @@ func _show_setup() -> void:
 	split_layer.visible = false
 	setup_panel.visible = true
 	end_panel.visible = false
-	title_label.text = "Munchies — Phase 5"
-	mode_line.text = "Pick a match mode · couch split-screen"
+	title_label.text = "Munchies — Phase 6"
+	mode_line.text = "Setup · Timer at 2:00 · optional bots · shared end card"
 	score_label.text = ""
 	radius_label.text = ""
 	hint_label.text = ""
-	setup_list.grab_focus()
+	_setup_focus = SetupFocus.MODES
+	_apply_setup_focus()
+	_refresh_slot_list()
 	setup_list.select(_mode_index)
 
 
-func _start_match() -> void:
+func _apply_setup_focus() -> void:
+	if _setup_focus == SetupFocus.MODES:
+		setup_list.grab_focus()
+		setup_list.select(_mode_index)
+		slot_list.deselect_all()
+	else:
+		slot_list.grab_focus()
+		_slot_cursor = clampi(_slot_cursor, 0, 3)
+		slot_list.select(_slot_cursor)
+	_refresh_slot_list()
+
+
+func _make_config_from_setup() -> MatchConfig:
 	var mode: MatchConfig.Mode = MODE_ORDER[_mode_index]
-	var cfg := MatchConfig.for_mode(mode, _hole_count)
+	var cfg := MatchConfig.for_mode(mode, 4)
+	cfg.set_slots(_slots)
+	return cfg
+
+
+func _start_match() -> void:
+	var cfg := _make_config_from_setup()
+	if cfg.active_hole_count() < 1:
+		return
 	sim = MunchiesSim.new()
 	sim.setup_match(cfg, 42)
 	swallow_tweens.clear()
@@ -175,20 +234,50 @@ func _process(dt: float) -> void:
 
 
 func _process_setup() -> void:
-	if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
-		_mode_index = (_mode_index - 1 + MODE_ORDER.size()) % MODE_ORDER.size()
-		setup_list.select(_mode_index)
-	if Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
-		_mode_index = (_mode_index + 1) % MODE_ORDER.size()
-		setup_list.select(_mode_index)
-	if Input.is_action_just_pressed("ui_left") or Input.is_action_just_pressed("move_left"):
-		_hole_count = maxi(2, _hole_count - 1)
-		_refresh_setup_holes()
-	if Input.is_action_just_pressed("ui_right") or Input.is_action_just_pressed("move_right"):
-		_hole_count = mini(4, _hole_count + 1)
-		_refresh_setup_holes()
+	if Input.is_key_pressed(KEY_TAB):
+		if not _tab_held:
+			_tab_held = true
+			_setup_focus = SetupFocus.SLOTS if _setup_focus == SetupFocus.MODES else SetupFocus.MODES
+			_apply_setup_focus()
+			return
+	else:
+		_tab_held = false
+
+	if _setup_focus == SetupFocus.MODES:
+		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+			_mode_index = (_mode_index - 1 + MODE_ORDER.size()) % MODE_ORDER.size()
+			setup_list.select(_mode_index)
+		if Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+			_mode_index = (_mode_index + 1) % MODE_ORDER.size()
+			setup_list.select(_mode_index)
+	else:
+		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+			_slot_cursor = (_slot_cursor - 1 + 4) % 4
+			_refresh_slot_list()
+		if Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+			_slot_cursor = (_slot_cursor + 1) % 4
+			_refresh_slot_list()
+		if Input.is_action_just_pressed("ui_left") or Input.is_action_just_pressed("move_left") \
+				or Input.is_action_just_pressed("ui_right") or Input.is_action_just_pressed("move_right"):
+			_toggle_slot(_slot_cursor)
 	if Input.is_action_just_pressed("confirm"):
 		_start_match()
+
+
+var _tab_held := false
+
+
+func _toggle_slot(index: int) -> void:
+	if index <= 0:
+		# Slot 1 (index 0) stays keyboard for the local human.
+		_slots[0] = MatchConfig.SLOT_KEYBOARD
+		_refresh_slot_list()
+		return
+	if str(_slots[index]) == MatchConfig.SLOT_BOT:
+		_slots[index] = MatchConfig.SLOT_EMPTY
+	else:
+		_slots[index] = MatchConfig.SLOT_BOT
+	_refresh_slot_list()
 
 
 func _process_playing(dt: float) -> void:
@@ -217,7 +306,7 @@ func _process_ended() -> void:
 
 
 func _collect_inputs() -> Dictionary:
-	# Slot 0 = keyboard human. Extra slots = bots emitting Input (pads deferred).
+	# Keyboard hole(s) read WASD/arrows; bots emit Input. Pads deferred.
 	var inputs := {}
 	for hole_v in sim.holes:
 		var hole: Dictionary = hole_v
@@ -395,7 +484,7 @@ func _rebuild_panes() -> void:
 
 func _make_layout(n: int) -> Control:
 	## 1 fullscreen · 2 side-by-side · 3/4 quadrants (blank cell when n==3).
-	if n == 1:
+	if n <= 1:
 		var root := Control.new()
 		_fill_parent(root)
 		root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -533,6 +622,9 @@ func _update_hud() -> void:
 	radius_label.text = ""
 	if _paused:
 		hint_label.text = "Paused (all panes) — Esc to resume"
+	elif sim.config.mode == MatchConfig.Mode.UNLIMITED:
+		# Unlimited: no clock, no target, no end card.
+		hint_label.text = "Unlimited sandbox — Esc pause · leave running"
 	elif sim.match_over and not sim.config.has_end_card():
 		hint_label.text = "Unlimited running — Esc pause"
 	else:
@@ -565,5 +657,6 @@ func _mode_line_text() -> String:
 					n += 1
 			return "Alive  %d" % n
 		MatchConfig.Mode.UNLIMITED:
+			# Never open unlimited with a clock or score target.
 			return "Unlimited — props respawn · no player swallow"
 	return cfg.label()

@@ -1,6 +1,7 @@
 class_name MatchConfig
 extends RefCounted
 ## Match mode flags for Munchies. Respawn and player-eat live here, not in swallow tests.
+## Setup slots: keyboard / bot / empty (pads deferred). Hole count is derived from filled slots.
 
 enum Mode {
 	TIMER,
@@ -9,6 +10,10 @@ enum Mode {
 	UNLIMITED,
 	LAST_STANDING,
 }
+
+const SLOT_EMPTY := "empty"
+const SLOT_KEYBOARD := "keyboard"
+const SLOT_BOT := "bot"
 
 const MODE_LABELS := {
 	Mode.TIMER: "Timer",
@@ -31,13 +36,28 @@ var score_target: int = 800
 var allow_player_eat: bool = true
 var respawn_props: bool = false
 var respawn_holes: bool = true
-var hole_count: int = 2 ## 2–4; extras are bots
+## Filled-slot count (1–4). Prefer reading `slots`; this stays for older call sites.
+var hole_count: int = 4
+## Four setup slots. Values: "keyboard" | "bot" | "empty". Pads deferred.
+var slots: PackedStringArray = PackedStringArray([
+	SLOT_KEYBOARD, SLOT_BOT, SLOT_BOT, SLOT_BOT,
+])
 
 
-static func for_mode(m: Mode, hole_count: int = 2) -> MatchConfig:
+static func default_slots(filled: int = 4) -> PackedStringArray:
+	var n: int = clampi(filled, 1, 4)
+	var out := PackedStringArray([SLOT_EMPTY, SLOT_EMPTY, SLOT_EMPTY, SLOT_EMPTY])
+	out[0] = SLOT_KEYBOARD
+	for i in range(1, n):
+		out[i] = SLOT_BOT
+	return out
+
+
+static func for_mode(m: Mode, hole_count: int = 4) -> MatchConfig:
 	var c := MatchConfig.new()
 	c.mode = m
-	c.hole_count = clampi(hole_count, 2, 4)
+	c.slots = default_slots(hole_count)
+	c.hole_count = c.active_hole_count()
 	c.duration = 120.0
 	c.score_target = 800
 	match m:
@@ -62,6 +82,26 @@ static func for_mode(m: Mode, hole_count: int = 2) -> MatchConfig:
 			c.respawn_props = false
 			c.respawn_holes = false
 	return c
+
+
+func set_slots(kinds: PackedStringArray) -> void:
+	slots = kinds.duplicate()
+	while slots.size() < 4:
+		slots.append(SLOT_EMPTY)
+	if slots.size() > 4:
+		slots.resize(4)
+	# Slot 0 stays the keyboard human when filled.
+	if slots[0] != SLOT_EMPTY:
+		slots[0] = SLOT_KEYBOARD
+	hole_count = active_hole_count()
+
+
+func active_hole_count() -> int:
+	var n := 0
+	for k in slots:
+		if str(k) != SLOT_EMPTY:
+			n += 1
+	return n
 
 
 func label() -> String:

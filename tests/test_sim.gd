@@ -1,5 +1,5 @@
 extends SceneTree
-## Headless Phase 1–5 checks. Run:
+## Headless Phase 1–6 checks. Run:
 ##   godot --headless --path . -s res://tests/test_sim.gd
 
 func _init() -> void:
@@ -21,17 +21,19 @@ func _init() -> void:
 	failed += _check_claim_sticks_on_contest()
 	failed += _check_progression_gates()
 	failed += _check_match_config_flags()
+	failed += _check_setup_slots_optional_bots()
 	failed += _check_timer_ends()
 	failed += _check_score_target_ends()
 	failed += _check_map_cleared_ends()
 	failed += _check_last_standing()
 	failed += _check_unlimited_no_end()
+	failed += _check_unlimited_no_clock_fields_used()
 	failed += _check_hole_respawn()
 	failed += _check_bot_emits_input()
 	failed += _check_player_swallow()
 
 	if failed == 0:
-		print("PASS: all Phase 1–5 sim checks")
+		print("PASS: all Phase 1–6 sim checks")
 		quit(0)
 	else:
 		print("FAIL: %d check(s) failed" % failed)
@@ -304,6 +306,76 @@ func _check_match_config_flags() -> int:
 		print("FAIL expected 2 bots, got ", bots)
 		return 1
 	print("ok match config flags")
+	return 0
+
+
+func _check_setup_slots_optional_bots() -> int:
+	## Phase 6: empty slots skipped; bots optional; default couch is 4 filled.
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 4)
+	if cfg.active_hole_count() != 4 or cfg.slots[0] != MatchConfig.SLOT_KEYBOARD:
+		print("FAIL default 4-slot couch setup")
+		return 1
+	cfg.set_slots(PackedStringArray([
+		MatchConfig.SLOT_KEYBOARD,
+		MatchConfig.SLOT_BOT,
+		MatchConfig.SLOT_EMPTY,
+		MatchConfig.SLOT_BOT,
+	]))
+	if cfg.active_hole_count() != 3:
+		print("FAIL optional empty slot count: ", cfg.active_hole_count())
+		return 1
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 11)
+	if sim.holes.size() != 3:
+		print("FAIL setup_match should skip empty slots, got ", sim.holes.size())
+		return 1
+	var slots_seen := {}
+	var bots := 0
+	for h in sim.holes:
+		slots_seen[int(h["slot"])] = true
+		if h["is_bot"]:
+			bots += 1
+	if bots != 2:
+		print("FAIL expected 2 bots with one empty slot, got ", bots)
+		return 1
+	if slots_seen.get(2, false):
+		print("FAIL empty slot 2 should not spawn a hole")
+		return 1
+	if not slots_seen.get(0, false) or not slots_seen.get(1, false) or not slots_seen.get(3, false):
+		print("FAIL expected holes on slots 0,1,3")
+		return 1
+	# Solo keyboard still valid (unlimited sandbox).
+	var solo := MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 1)
+	if solo.active_hole_count() != 1 or solo.has_end_card():
+		print("FAIL solo unlimited slot")
+		return 1
+	print("ok setup slots optional bots")
+	return 0
+
+
+func _check_unlimited_no_clock_fields_used() -> int:
+	## Unlimited keeps duration/target on the config struct but never ends or shows an end card.
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 4)
+	if cfg.has_end_card():
+		print("FAIL unlimited must not have end card")
+		return 1
+	var sim := MunchiesSim.new()
+	sim.setup_match(cfg, 5)
+	sim.elapsed = 9999.0
+	for h in sim.holes:
+		h["score"] = 9999
+	sim.objects.clear()
+	var inputs := {}
+	for h in sim.holes:
+		inputs[int(h["id"])] = Vector2.ZERO
+	for e in sim.step(inputs, 1.0 / 60.0):
+		if e["kind"] == MunchiesSim.EVENT_MATCH_ENDED:
+			print("FAIL unlimited ended despite clock/target/map-clear conditions")
+			return 1
+	if sim.match_over:
+		print("FAIL unlimited match_over")
+		return 1
+	print("ok unlimited ignores clock and target")
 	return 0
 
 
