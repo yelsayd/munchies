@@ -31,6 +31,7 @@ func _init() -> void:
 	failed += _check_hole_respawn()
 	failed += _check_bot_emits_input()
 	failed += _check_player_swallow()
+	failed += _check_claimed_prop_no_orbit()
 
 	if failed == 0:
 		print("PASS: all Phase 1–6 sim checks")
@@ -619,4 +620,44 @@ func _check_player_swallow() -> int:
 		print("FAIL unlimited should not swallow players")
 		return 1
 	print("ok player swallow")
+	return 0
+
+
+func _check_claimed_prop_no_orbit() -> int:
+	## Claimed prop with tangential (orbit) speed near a stationary hole must fall in and consume.
+	## Old pull added inward accel without killing sideways velocity → stable circles when hole stops.
+	var sim := MunchiesSim.new()
+	sim.setup_empty(1, 40.0)
+	var hole := sim.player_hole()
+	hole["vx"] = 0.0
+	hole["vy"] = 0.0
+	# Place just outside consume radius with pure tangential velocity ≈ circular-orbit speed.
+	var r0: float = float(hole["radius"]) * 0.9
+	var orbit_v: float = sqrt(MunchiesSim.PROP_PULL_ACCEL * r0)
+	sim.objects.append(MunchiesSim.make_prop(42, r0, 0.0, 0, MunchiesSim.TIER0_RADIUS))
+	var prop: Dictionary = sim.objects[0]
+	prop["vx"] = 0.0
+	prop["vy"] = orbit_v
+	prop["claimed_by"] = int(hole["id"])
+	var swallowed := false
+	var min_dist: float = r0
+	for i in 300:
+		for e in sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_SWALLOWED and int(e["prop_id"]) == 42:
+				swallowed = true
+		if not sim.objects.is_empty():
+			var p: Dictionary = sim.objects[0]
+			var d: float = Vector2(float(p["x"]), float(p["y"])).distance_to(
+				Vector2(float(hole["x"]), float(hole["y"]))
+			)
+			if d < min_dist:
+				min_dist = d
+	if not swallowed:
+		print("FAIL claimed prop orbited without consume; min_dist=", min_dist, " consume_r=",
+			float(hole["radius"]) * MunchiesSim.PROP_CONSUME_MULT)
+		return 1
+	if sim.alive_prop_count() != 0:
+		print("FAIL prop still alive after claimed consume")
+		return 1
+	print("ok claimed prop no orbit (swallowed)")
 	return 0

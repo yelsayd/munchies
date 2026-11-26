@@ -521,15 +521,20 @@ func _update_props(dt: float, events: Array) -> void:
 		var consume_r: float = hr * PROP_CONSUME_MULT
 
 		if best_dist > 0.0001:
+			# Unit vector from prop → hole center.
 			var nx: float = (hx - px) / best_dist
 			var ny: float = (hy - py) / best_dist
-			var pvx: float = float(prop["vx"]) + nx * PROP_PULL_ACCEL * dt
-			var pvy: float = float(prop["vy"]) + ny * PROP_PULL_ACCEL * dt
-			var speed: float = sqrt(pvx * pvx + pvy * pvy)
-			if speed > PROP_PULL_MAX_SPEED:
-				var s: float = PROP_PULL_MAX_SPEED / speed
-				pvx *= s
-				pvy *= s
+			# Keep only the toward-hole (radial) part of velocity, then accelerate in.
+			# Dropping sideways speed stops stable orbits when the hole stands still.
+			# Example: prop at (1,0) with vy=5 used to circle forever; now it falls in.
+			var v_rad: float = float(prop["vx"]) * nx + float(prop["vy"]) * ny
+			v_rad += PROP_PULL_ACCEL * dt
+			if v_rad > PROP_PULL_MAX_SPEED:
+				v_rad = PROP_PULL_MAX_SPEED
+			elif v_rad < -PROP_PULL_MAX_SPEED:
+				v_rad = -PROP_PULL_MAX_SPEED
+			var pvx: float = v_rad * nx
+			var pvy: float = v_rad * ny
 			prop["vx"] = pvx
 			prop["vy"] = pvy
 			prop["x"] = px + pvx * dt
