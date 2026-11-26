@@ -211,7 +211,9 @@ func _sync_tweens() -> void:
 		col.a = scale_v
 		node.material_override = _mat(col, true)
 		_tweens_root.add_child(node)
-		node.position = Vector3(float(tw["x"]), _prop_height(int(tw["tier"]), float(tw["radius"]) * scale_v) * 0.5, float(tw["y"]))
+		var base_h: float = _prop_height(int(tw["tier"]), float(tw["radius"])) * 0.5 * scale_v
+		var drop: float = float(tw.get("drop", 0.0))
+		node.position = Vector3(float(tw["x"]), base_h - drop, float(tw["y"]))
 		_tween_nodes.append(node)
 
 

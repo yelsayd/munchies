@@ -31,7 +31,7 @@ func _init() -> void:
 	failed += _check_hole_respawn()
 	failed += _check_bot_emits_input()
 	failed += _check_player_swallow()
-	failed += _check_claimed_prop_no_orbit()
+	failed += _check_cover_to_swallow()
 
 	if failed == 0:
 		print("PASS: all Phase 1–6 sim checks")
@@ -623,41 +623,72 @@ func _check_player_swallow() -> int:
 	return 0
 
 
-func _check_claimed_prop_no_orbit() -> int:
-	## Claimed prop with tangential (orbit) speed near a stationary hole must fall in and consume.
-	## Old pull added inward accel without killing sideways velocity → stable circles when hole stops.
+func _check_cover_to_swallow() -> int:
+	## No gravity: partial overlap never swallows; full coverage does; props are not pulled.
 	var sim := MunchiesSim.new()
 	sim.setup_empty(1, 40.0)
 	var hole := sim.player_hole()
 	hole["vx"] = 0.0
 	hole["vy"] = 0.0
-	# Place just outside consume radius with pure tangential velocity ≈ circular-orbit speed.
-	var r0: float = float(hole["radius"]) * 0.9
-	var orbit_v: float = sqrt(MunchiesSim.PROP_PULL_ACCEL * r0)
-	sim.objects.append(MunchiesSim.make_prop(42, r0, 0.0, 0, MunchiesSim.TIER0_RADIUS))
+	var hr: float = float(hole["radius"])
+	var pr: float = MunchiesSim.TIER0_RADIUS
+	# Partial: dist + pr > hr (edge of prop sticks out).
+	var partial_x: float = hr - pr * 0.4
+	assert(not MunchiesSim.prop_fully_covered(partial_x, pr, hr))
+	sim.objects.append(MunchiesSim.make_prop(42, partial_x, 0.0, 0, pr))
 	var prop: Dictionary = sim.objects[0]
-	prop["vx"] = 0.0
-	prop["vy"] = orbit_v
+	prop["vx"] = 8.0
+	prop["vy"] = 8.0
 	prop["claimed_by"] = int(hole["id"])
+	var start := Vector2(float(prop["x"]), float(prop["y"]))
+	for i in 120:
+		sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0)
+	if sim.alive_prop_count() != 1:
+		print("FAIL partial cover swallowed prop")
+		return 1
+	prop = sim.objects[0]
+	if Vector2(float(prop["x"]), float(prop["y"])).distance_to(start) > 0.01:
+		print("FAIL no-gravity prop was pulled/moved")
+		return 1
+	if absf(float(prop["vx"])) > 0.01 or absf(float(prop["vy"])) > 0.01:
+		print("FAIL prop velocity not cleared")
+		return 1
+	# Full cover: slide prop under the hole.
+	prop["x"] = 0.05
+	prop["y"] = 0.0
+	assert(MunchiesSim.prop_fully_covered(0.05, pr, hr))
 	var swallowed := false
-	var min_dist: float = r0
-	for i in 300:
+	for i in 30:
 		for e in sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0):
 			if e["kind"] == MunchiesSim.EVENT_SWALLOWED and int(e["prop_id"]) == 42:
 				swallowed = true
-		if not sim.objects.is_empty():
-			var p: Dictionary = sim.objects[0]
-			var d: float = Vector2(float(p["x"]), float(p["y"])).distance_to(
-				Vector2(float(hole["x"]), float(hole["y"]))
-			)
-			if d < min_dist:
-				min_dist = d
 	if not swallowed:
-		print("FAIL claimed prop orbited without consume; min_dist=", min_dist, " consume_r=",
-			float(hole["radius"]) * MunchiesSim.PROP_CONSUME_MULT)
+		print("FAIL full cover did not swallow")
 		return 1
-	if sim.alive_prop_count() != 0:
-		print("FAIL prop still alive after claimed consume")
+	# Building must be entirely inside — size gate + full coverage.
+	sim.objects.clear()
+	var br: float = MunchiesSim.TIER3_RADIUS
+	hr = br / MunchiesSim.PROP_EAT_RATIO + 0.05
+	hole["radius"] = hr
+	hole["mass"] = hr * hr
+	var stuck_x: float = hr - br * 0.5
+	assert(not MunchiesSim.prop_fully_covered(stuck_x, br, hr))
+	sim.objects.append(MunchiesSim.make_prop(99, stuck_x, 0.0, 3, br))
+	for i in 60:
+		sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0)
+	if sim.alive_prop_count() != 1:
+		print("FAIL partial building cover swallowed")
 		return 1
-	print("ok claimed prop no orbit (swallowed)")
+	sim.objects[0]["x"] = 0.0
+	sim.objects[0]["y"] = 0.0
+	assert(MunchiesSim.prop_fully_covered(0.0, br, hr))
+	var ate_building := false
+	for i in 30:
+		for e in sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_SWALLOWED and int(e["prop_id"]) == 99:
+				ate_building = true
+	if not ate_building:
+		print("FAIL fully covered building not swallowed; hr=", hr, " br=", br)
+		return 1
+	print("ok cover-to-swallow (no gravity)")
 	return 0

@@ -18,11 +18,13 @@ cd ~/dev/munchies
 godot --path .
 ```
 
+**Cursor / VS Code:** open this folder, pick **Run Munchies** (compound → Godot on PATH) in Run and Debug, then press **F5**. If `godot` is missing from PATH, choose **Godot (brew cask)** instead (`/Applications/Godot.app/...` from `brew install --cask godot`).
+
 Or open the folder in the Godot editor and press Play (`F5`).
 
 ### 2D / 3D view toggle
 
-Default is **3D** (single pane following You). Sim `step`, claims, and modes stay 2D (`x, y, radius` authority).
+Default is **3D** (single pane following You). Sim `step`, claims, and modes stay 2D (`x, y, radius` authority). Props have **no suction pull** — the hole must **fully cover** a prop (whole footprint inside the hole disc) to swallow it; the 3D view drops the mesh briefly into the pit.
 
 | How | Effect |
 | --- | --- |

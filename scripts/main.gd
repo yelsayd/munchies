@@ -8,7 +8,9 @@ extends Node2D
 const PIXELS_PER_METER := 24.0
 const CAMERA_SETTLE := 0.2
 const HOLE_SCREEN_FRACTION := 0.20 ## diameter vs shorter pane side
-const SWALLOW_TWEEN_SEC := 0.20
+const SWALLOW_TWEEN_SEC := 0.28
+## How far (meters) a swallowed prop drops into the pit during the presentation tween.
+const SWALLOW_DROP_M := 2.4
 const PANE_GAP := 3.0
 const TOP_HUD_BAND := 72.0
 ## 3D camera: height / back offset in hole-radii (tilted chase).
@@ -412,6 +414,7 @@ func _handle_events(events: Array) -> void:
 				"radius": float(ev.get("radius", 0.25)),
 				"tier": int(ev.get("tier", 0)),
 				"scale": 1.0,
+				"drop": 0.0, ## meters down into the pit (3D presentation)
 				"age": 0.0,
 				"hole_id": hid,
 			})
@@ -435,7 +438,10 @@ func _tick_presentation(dt: float) -> void:
 		var tw: Dictionary = tw_v
 		tw["age"] = float(tw["age"]) + dt
 		var t: float = clampf(float(tw["age"]) / SWALLOW_TWEEN_SEC, 0.0, 1.0)
+		# Ease into the pit: shrink + drop (presentation only; sim already removed the prop).
+		var ease_t: float = t * t
 		tw["scale"] = 1.0 - t
+		tw["drop"] = ease_t * SWALLOW_DROP_M
 		var hole: Dictionary = sim.hole_by_id(int(tw.get("hole_id", -1)))
 		var hx: float = float(hole.get("x", tw["target_x"]))
 		var hy: float = float(hole.get("y", tw["target_y"]))

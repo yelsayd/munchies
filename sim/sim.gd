@@ -17,10 +17,14 @@ const STEER_TAU := 0.15
 # Gate: prop.radius ≤ hole.radius × 0.95 (not quite equal size).
 # Example: hole radius 2.0 can eat props up to 1.9.
 const PROP_EAT_RATIO := 0.95
+## How close a hole must be to claim a prop for the contested ring (no pull).
+## Claim when center distance < hole.radius × this (props stay put until covered).
 const PROP_SUCTION_MULT := 2.0
-const PROP_CONSUME_MULT := 0.45
-const PROP_PULL_ACCEL := 28.0
-const PROP_PULL_MAX_SPEED := 18.0
+## Legacy names kept so old call sites/tests can see the no-gravity switch.
+## Consume is full coverage now (see prop_fully_covered); pull accel is unused.
+const PROP_CONSUME_MULT := 1.0 ## unused — swallow uses full coverage
+const PROP_PULL_ACCEL := 0.0 ## no gravity / no suction pull on props
+const PROP_PULL_MAX_SPEED := 0.0
 
 const PLAYER_EAT_RATIO := 0.80
 const PLAYER_SUCTION_MULT := 1.35
@@ -452,7 +456,15 @@ func _add_mass(hole: Dictionary, mass_gain: float) -> void:
 	hole["score_changed_tick"] = tick
 
 
-func _update_props(dt: float, events: Array) -> void:
+## True when the prop's full footprint sits inside the hole circle.
+## Example: building r=3.2 needs hole r≥3.2 and center close enough that
+## distance + 3.2 ≤ hole.radius — partial overlap is not enough.
+static func prop_fully_covered(dist: float, prop_radius: float, hole_radius: float) -> bool:
+	return dist + prop_radius <= hole_radius
+
+
+func _update_props(_dt: float, events: Array) -> void:
+	## No gravity: props do not get pulled. The hole must fully cover them to swallow.
 	var alive: Array = _alive_holes()
 	if alive.is_empty():
 		return
@@ -467,8 +479,11 @@ func _update_props(dt: float, events: Array) -> void:
 		var px: float = float(prop["x"])
 		var py: float = float(prop["y"])
 		var pr: float = float(prop["radius"])
+		# Static world props — no suction velocity.
+		prop["vx"] = 0.0
+		prop["vy"] = 0.0
 
-		# Closest qualifying hole claims; others ignore a claimed prop.
+		# Closest qualifying hole claims (ring UI); others ignore a claimed prop.
 		var best_hole: Dictionary = {}
 		var best_dist: float = INF
 		for hole_v in alive:
@@ -484,16 +499,13 @@ func _update_props(dt: float, events: Array) -> void:
 				best_hole = hole
 
 		if best_hole.is_empty():
-			# Too big for everyone nearby, or out of suction: clear claim, no pull.
 			prop["claimed_by"] = -1
-			prop["vx"] = 0.0
-			prop["vy"] = 0.0
 			continue
 
 		var hole_id: int = int(best_hole["id"])
 		var claimed: int = int(prop["claimed_by"])
 		if claimed != -1 and claimed != hole_id:
-			# Another hole already owns it — only the claimer may pull.
+			# Another hole already owns it — only the claimer keeps the ring.
 			var still_claimer := false
 			for hole_v2 in alive:
 				var h2: Dictionary = hole_v2
@@ -518,33 +530,11 @@ func _update_props(dt: float, events: Array) -> void:
 		var hy: float = float(best_hole["y"])
 		var hr: float = float(best_hole["radius"])
 		var eat_limit: float = hr * PROP_EAT_RATIO
-		var consume_r: float = hr * PROP_CONSUME_MULT
-
-		if best_dist > 0.0001:
-			# Unit vector from prop → hole center.
-			var nx: float = (hx - px) / best_dist
-			var ny: float = (hy - py) / best_dist
-			# Keep only the toward-hole (radial) part of velocity, then accelerate in.
-			# Dropping sideways speed stops stable orbits when the hole stands still.
-			# Example: prop at (1,0) with vy=5 used to circle forever; now it falls in.
-			var v_rad: float = float(prop["vx"]) * nx + float(prop["vy"]) * ny
-			v_rad += PROP_PULL_ACCEL * dt
-			if v_rad > PROP_PULL_MAX_SPEED:
-				v_rad = PROP_PULL_MAX_SPEED
-			elif v_rad < -PROP_PULL_MAX_SPEED:
-				v_rad = -PROP_PULL_MAX_SPEED
-			var pvx: float = v_rad * nx
-			var pvy: float = v_rad * ny
-			prop["vx"] = pvx
-			prop["vy"] = pvy
-			prop["x"] = px + pvx * dt
-			prop["y"] = py + pvy * dt
-			events.append({"kind": EVENT_SUCKED, "hole_id": hole_id, "prop_id": prop["id"]})
-
-		var cdx: float = hx - float(prop["x"])
-		var cdy: float = hy - float(prop["y"])
+		var cdx: float = hx - px
+		var cdy: float = hy - py
 		var cdist: float = sqrt(cdx * cdx + cdy * cdy)
-		if cdist < consume_r and pr <= eat_limit:
+		# Swallow only when the whole prop disc is inside the hole (and size gate).
+		if pr <= eat_limit and prop_fully_covered(cdist, pr, hr):
 			var mass_gain: float = pr * pr
 			_add_mass(best_hole, mass_gain)
 			prop["alive"] = false
@@ -553,8 +543,8 @@ func _update_props(dt: float, events: Array) -> void:
 				_pending_prop_spawns.append({
 					"tier": int(prop["tier"]),
 					"at": elapsed + PROP_RESPAWN_DELAY,
-					"x": float(prop["x"]),
-					"y": float(prop["y"]),
+					"x": px,
+					"y": py,
 				})
 			events.append({
 				"kind": EVENT_SWALLOWED,
@@ -562,8 +552,8 @@ func _update_props(dt: float, events: Array) -> void:
 				"prop_id": prop["id"],
 				"mass_gained": mass_gain,
 				"tier": prop["tier"],
-				"x": prop["x"],
-				"y": prop["y"],
+				"x": px,
+				"y": py,
 				"radius": pr,
 			})
 
