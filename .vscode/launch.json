@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Godot (PATH)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "godot --path \"${workspaceFolder}\"",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Godot (brew cask)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "/Applications/Godot.app/Contents/MacOS/Godot --path \"${workspaceFolder}\"",
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run Munchies",
+      "configurations": ["Godot (PATH)"],
+      "stopAll": true
+    }
+  ]
+}

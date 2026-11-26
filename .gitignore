@@ -12,5 +12,7 @@ export_presets.cfg
 .DS_Store
 *.swp
 *~
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
