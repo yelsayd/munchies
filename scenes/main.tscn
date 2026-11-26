@@ -1,0 +1,55 @@
+[gd_scene load_steps=3 format=3 uid="uid://bmunchiesphase1"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/world_view.gd" id="2_world"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="World" type="Node2D" parent="."]
+script = ExtResource("2_world")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(0, 0)
+zoom = Vector2(1, 1)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Margin" type="MarginContainer" parent="HUD"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 20
+
+[node name="VBox" type="VBoxContainer" parent="HUD/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="HUD/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 1)
+theme_override_font_sizes/font_size = 22
+text = "Munchies — Phase 1"
+
+[node name="Score" type="Label" parent="HUD/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.95, 0.92, 1)
+theme_override_font_sizes/font_size = 28
+text = "Score  10"
+
+[node name="Radius" type="Label" parent="HUD/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 0.82, 1)
+theme_override_font_sizes/font_size = 20
+text = "Radius  1.0"
+
+[node name="Hint" type="Label" parent="HUD/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.72, 0.68, 1)
+theme_override_font_sizes/font_size = 14
+text = "WASD / arrows"
