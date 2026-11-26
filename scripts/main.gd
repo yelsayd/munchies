@@ -172,6 +172,7 @@ func _show_setup() -> void:
 func _apply_setup_focus() -> void:
 	## Keep both lists FOCUS_NONE so only `_process_setup` handles ↑↓.
 	## Visual focus is selection + the ▸ mark / hint text — never grab_focus.
+	## Only the active list stays selected; inactive list is deselected.
 	setup_list.focus_mode = Control.FOCUS_NONE
 	slot_list.focus_mode = Control.FOCUS_NONE
 	if _setup_focus == SetupFocus.MODES:
@@ -179,6 +180,7 @@ func _apply_setup_focus() -> void:
 		setup_list.ensure_current_is_visible()
 		slot_list.deselect_all()
 	else:
+		setup_list.deselect_all()
 		_slot_cursor = clampi(_slot_cursor, 0, 3)
 		slot_list.select(_slot_cursor)
 		slot_list.ensure_current_is_visible()
@@ -264,26 +266,18 @@ func _process_setup() -> void:
 	else:
 		_tab_held = false
 
+	# ↑↓ wrap inside the active list only. Tab alone switches SetupFocus.
 	if _setup_focus == SetupFocus.MODES:
 		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
 			_mode_index = (_mode_index - 1 + MODE_ORDER.size()) % MODE_ORDER.size()
 			setup_list.select(_mode_index)
 		elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
-			# Edge: leave modes into slots instead of wrapping + dual-list scroll.
-			if _mode_index >= MODE_ORDER.size() - 1:
-				_setup_focus = SetupFocus.SLOTS
-				_apply_setup_focus()
-			else:
-				_mode_index += 1
-				setup_list.select(_mode_index)
+			_mode_index = (_mode_index + 1) % MODE_ORDER.size()
+			setup_list.select(_mode_index)
 	else:
 		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
-			if _slot_cursor <= 0:
-				_setup_focus = SetupFocus.MODES
-				_apply_setup_focus()
-			else:
-				_slot_cursor -= 1
-				_refresh_slot_list()
+			_slot_cursor = (_slot_cursor - 1 + 4) % 4
+			_refresh_slot_list()
 		elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
 			_slot_cursor = (_slot_cursor + 1) % 4
 			_refresh_slot_list()
