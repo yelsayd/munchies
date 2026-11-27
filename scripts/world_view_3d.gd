@@ -265,7 +265,10 @@ func _sync_tweens() -> void:
 		_tweens_root.add_child(node)
 		var drop: float = float(tw.get("drop", 0.0))
 		# Freeze XZ; tip pose + fall straight down (no slide toward hole center).
-		_place_prop_tipped(node, fake, _prop_height(tier, r * scale_v))
+		var face_yaw := 0.0
+		if tier == 2 and host != null and host.sim != null:
+			face_yaw = -_prop_facing(fake, host.sim as MunchiesSim)
+		_place_prop_tipped(node, fake, _prop_height(tier, r * scale_v), face_yaw)
 		node.position.y -= drop
 		_tween_nodes.append(node)
 
@@ -329,21 +332,20 @@ func _place_prop(node: MeshInstance3D, prop: Dictionary, sim: MunchiesSim) -> vo
 	var r: float = float(prop["radius"])
 	var tier: int = int(prop["tier"])
 	var h: float = _prop_height(tier, r)
+	var face_yaw: float = -_prop_facing(prop, sim) if tier == 2 else 0.0
 	var tip_angle: float = float(prop.get("tip_angle", 0.0))
 	if bool(prop.get("fallen", false)) or tip_angle > 0.01:
-		_place_prop_tipped(node, prop, h)
+		_place_prop_tipped(node, prop, h, face_yaw)
 		return
 	# Upright: cars keep road facing; others face world axes.
 	node.transform = Transform3D.IDENTITY
 	node.position = Vector3(float(prop["x"]), h * 0.5, float(prop["y"]))
-	if tier == 2:
-		node.rotation.y = -_prop_facing(prop, sim)
-	else:
-		node.rotation = Vector3.ZERO
+	node.rotation = Vector3(0.0, face_yaw, 0.0)
 
 
-func _place_prop_tipped(node: MeshInstance3D, prop: Dictionary, height: float) -> void:
-	## Hinge on the footprint edge opposite the tip direction; lean toward the hole.
+func _place_prop_tipped(node: MeshInstance3D, prop: Dictionary, height: float, face_yaw: float = 0.0) -> void:
+	## Tip toward the hole while keeping the mesh on the ground.
+	## Cars keep road yaw so a vertical car doesn't snap 90° when tip starts.
 	var dims: Vector2 = MunchiesSim.prop_tip_dims(prop)
 	var width: float = dims.x
 	var tip_angle: float = float(prop.get("tip_angle", 0.0))
@@ -356,17 +358,22 @@ func _place_prop_tipped(node: MeshInstance3D, prop: Dictionary, height: float) -
 		tip = Vector3.RIGHT
 	else:
 		tip = tip.normalized()
-	# Positive rotation around this axis tips the top toward `tip`.
+	# UP × tip with +angle rotates UP toward tip.
 	var axis := Vector3.UP.cross(tip)
 	if axis.length_squared() < 0.0001:
 		axis = Vector3.RIGHT
 	else:
 		axis = axis.normalized()
-	var basis := Basis(axis, tip_angle)
-	var hinge := -tip * (width * 0.5)
-	var local_from_hinge := tip * (width * 0.5) + Vector3(0.0, height * 0.5, 0.0)
+	var yaw_basis := Basis(Vector3.UP, face_yaw)
+	var tip_basis := Basis(axis, tip_angle)
+	var basis := tip_basis * yaw_basis
 	var origin := Vector3(float(prop["x"]), 0.0, float(prop["y"]))
-	var mesh_center: Vector3 = origin + hinge + basis * local_from_hinge
+	# Arc the center toward the hole; sit_y keeps the body resting on the ground
+	# (upright → height/2, fallen on its side → width/2) so nothing embeds.
+	var local_upright: Vector3 = yaw_basis * Vector3(0.0, height * 0.5, 0.0)
+	var tipped: Vector3 = tip_basis * local_upright
+	var sit_y: float = lerpf(height * 0.5, width * 0.5, sin(tip_angle))
+	var mesh_center := Vector3(origin.x + tipped.x, maxf(sit_y, 0.02), origin.z + tipped.z)
 	node.transform = Transform3D(basis, mesh_center)
 
 
