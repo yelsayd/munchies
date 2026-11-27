@@ -498,6 +498,7 @@ func _rebuild_panes_3d() -> void:
 	sv.gui_disable_input = true
 	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	sv.own_world_3d = true
+	sv.msaa_3d = Viewport.MSAA_4X
 	sv.size = Vector2i(2, 2)
 	svc.add_child(sv)
 

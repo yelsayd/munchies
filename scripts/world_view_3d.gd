@@ -206,10 +206,10 @@ func _sync_holes(sim: MunchiesSim) -> void:
 		var id: int = int(hole["id"])
 		seen[id] = true
 		var root: Node3D = _hole_nodes.get(id) as Node3D
-		# Recreate if this is a pre-torus hole (rim was a flat cylinder buried under roads).
+		# Recreate if rim is not the current flat-ring ArrayMesh (old cylinder/torus rims).
 		if root != null:
 			var rim_n: MeshInstance3D = root.get_node_or_null("Rim") as MeshInstance3D
-			if rim_n == null or not (rim_n.mesh is TorusMesh):
+			if rim_n == null or not (rim_n.mesh is ArrayMesh) or not bool(rim_n.get_meta("flat_ring", false)):
 				root.queue_free()
 				_hole_nodes.erase(id)
 				root = null
@@ -399,7 +399,7 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	cyl.top_radius = 1.0
 	cyl.bottom_radius = 1.0
 	cyl.height = 0.08
-	cyl.radial_segments = 32
+	cyl.radial_segments = 64
 	pit.mesh = cyl
 	pit.material_override = _mat(Color(0.03, 0.03, 0.04))
 	pit.position.y = HOLE_FILL_Y
@@ -412,38 +412,55 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	ic.top_radius = 0.72
 	ic.bottom_radius = 0.72
 	ic.height = 0.06
-	ic.radial_segments = 24
+	ic.radial_segments = 48
 	inner.mesh = ic
 	inner.material_override = _mat(Color(0.01, 0.01, 0.015))
 	inner.position.y = HOLE_FILL_Y + 0.02
 	root.add_child(inner)
 
-	# Colored rim as a real torus so it reads as a border, not a disc under roads.
+	# Flat annular rim — high segment count reads as a smooth circle (torus looked faceted).
 	var rim := MeshInstance3D.new()
 	rim.name = "Rim"
-	var torus := TorusMesh.new()
-	torus.inner_radius = 0.90
-	torus.outer_radius = 1.06
-	torus.rings = 12
-	torus.ring_segments = 32
-	rim.mesh = torus
+	rim.mesh = _make_flat_ring_mesh(0.92, 1.08, 96)
+	rim.set_meta("flat_ring", true)
 	rim.position.y = HOLE_RIM_Y
 	root.add_child(rim)
 
 	var flash := MeshInstance3D.new()
 	flash.name = "Flash"
-	var ft := TorusMesh.new()
-	ft.inner_radius = 0.98
-	ft.outer_radius = 1.18
-	ft.rings = 10
-	ft.ring_segments = 32
-	flash.mesh = ft
+	flash.mesh = _make_flat_ring_mesh(0.98, 1.16, 96)
+	flash.set_meta("flat_ring", true)
 	flash.position.y = HOLE_FLASH_Y
 	flash.material_override = _mat(Color(1, 1, 1, 0.0), true)
 	flash.visible = false
 	root.add_child(flash)
 
 	return root
+
+
+func _make_flat_ring_mesh(inner_r: float, outer_r: float, segments: int = 96) -> ArrayMesh:
+	## Flat XZ annulus. Looks like a clean circular border under a tilted camera.
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in segments:
+		var a0: float = TAU * float(i) / float(segments)
+		var a1: float = TAU * float(i + 1) / float(segments)
+		var c0 := cos(a0)
+		var s0 := sin(a0)
+		var c1 := cos(a1)
+		var s1 := sin(a1)
+		var i0 := Vector3(c0 * inner_r, 0.0, s0 * inner_r)
+		var i1 := Vector3(c1 * inner_r, 0.0, s1 * inner_r)
+		var o0 := Vector3(c0 * outer_r, 0.0, s0 * outer_r)
+		var o1 := Vector3(c1 * outer_r, 0.0, s1 * outer_r)
+		st.set_normal(Vector3.UP)
+		st.add_vertex(i0)
+		st.add_vertex(o0)
+		st.add_vertex(o1)
+		st.add_vertex(i0)
+		st.add_vertex(o1)
+		st.add_vertex(i1)
+	return st.commit()
 
 
 func _place_hole(root: Node3D, hole: Dictionary, _sim: MunchiesSim) -> void:
