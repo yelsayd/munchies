@@ -1,6 +1,6 @@
 # Munchies
 
-Local macOS hole-swallow game (Godot 4). Couch match on `main`: setup screen, four slots (keyboard + optional bots; pads deferred), shared end card. The 3D view skins the same sim (`x, y, radius` authority) with meshes and a tilted chase camera.
+Local macOS hole-swallow game (Godot 4). Couch match on `main`: setup screen, four slots (You + optional bots; extra pads deferred), shared end card. The 3D view skins the same sim (`x, y, radius` authority) with meshes and a tilted chase camera. Keyboard and a standard gamepad both work for You.
 
 ## Requirements
 
@@ -28,13 +28,20 @@ Props have **no suction pull**. Upright props need full disc cover to swallow; o
 
 Opens with **Timer — 2:00** highlighted and four slots filled (You + 3 bots).
 
-- **Tab** — switch focus between modes and slots
-- **↑ / ↓** (or W/S) — move in the focused list
-- **← / →** (or A/D) — on slots 2–4, toggle **Bot** / **Empty**
-- **Enter / Space** — start
-- **Esc** — pause in-match (freezes the whole sim); from the end card, also returns to setup
+| Action | Keyboard | Gamepad |
+| --- | --- | --- |
+| Switch modes ↔ slots | **Tab** | **LB / RB / Select** |
+| Move in focused list | **↑ / ↓** (or W/S) | **D-pad / left stick** |
+| Toggle Bot / Empty (slots 2–4) | **← / →** (or A/D) | **D-pad / left stick** |
+| Start | **Enter / Space** | **A** |
+| Pause in-match | **Esc** | **Start / B** |
 
-Slot **1** is always the keyboard human (**You**). Empty slots stay empty; bots fill the rest until pads exist. The match view follows You in 3D (multi-pane 3D deferred).
+Slot **1** is always the local human (**You** — keyboard or pad). Empty slots stay empty; bots fill the rest until extra pads exist. The match view follows You in 3D (multi-pane / multi-pad deferred).
+
+### In match
+
+- Move with **WASD / arrows** or the **left stick / D-pad**
+- **Esc / Start / B** pauses; **A / Enter** confirms pause-menu choices
 
 ### Modes
 
@@ -59,11 +66,11 @@ godot --headless --path . -s res://tests/test_sim.gd
 | `sim/sim.gd` | Pure `step` simulation (modes, swallow, exclusive claims, respawn) |
 | `sim/match_config.gd` | Mode flags + setup slots (`MatchConfig`) |
 | `sim/bot.gd` | Bot → `Input` only |
-| `scripts/main.gd` | Setup / slots / keyboard + bots / 3D pane / pause / end card |
+| `scripts/main.gd` | Setup / slots / keyboard+pad + bots / 3D pane / pause / end card |
 | `scripts/world_view_3d.gd` | Presentation-only Node3D meshes synced from sim each frame |
 | `scenes/main.tscn` | Main scene |
 | `tests/test_sim.gd` | Headless rule checks |
 
 ## Workflow
 
-Push straight to `main`. No feature branches or PRs unless asked. Gamepad support stays deferred.
+Push straight to `main`. No feature branches or PRs unless asked. Extra local pads (multi-controller couch) stay deferred.

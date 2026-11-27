@@ -1,11 +1,14 @@
 extends Node2D
 ## Setup (modes + slot list + optional bots) → 3D match view.
-## Slot 0 = keyboard; other filled slots = bots until pads exist. Esc pauses all.
+## Slot 0 = local human (keyboard / pad); other filled slots = bots until pads exist.
 ## Unlimited never shows a clock or score target. Shared end card for ending modes.
-## Presentation-only World3D reads sim each frame (one pane following the keyboard hole).
+## Presentation-only World3D reads sim each frame (one pane following You).
 
 const CAMERA_SETTLE := 0.2
 const SWALLOW_TWEEN_SEC := 0.72
+## Menu stick: require a clear tilt, then return-to-center before the next step.
+const MENU_STICK_DEADZONE := 0.55
+const MENU_STICK_COOLDOWN := 0.2
 ## Rim pulse only after the hole grows by this much (not every swallow nibble).
 const GROW_FLASH_STEP := 0.12
 const GROW_FLASH_SEC := 0.34
@@ -56,8 +59,10 @@ var _screen: Screen = Screen.SETUP
 var _mode_index: int = 0 ## Timer highlighted by default
 var _setup_focus: SetupFocus = SetupFocus.MODES
 var _slot_cursor: int = 1
-## Four setup slots. Slot 0 is always keyboard when filled.
+## Four setup slots. Slot 0 is always the local human when filled.
 var _slots: PackedStringArray = MatchConfig.default_slots(4)
+var _menu_stick_cd: float = 0.0
+var _menu_stick_armed: bool = true
 ## Presentation-only swallow ghosts: {x,y,radius,tier,scale,age,drop,hole_id,...}
 var swallow_tweens: Array = []
 ## Rim grow flash (seconds remaining) — not tied to every swallow.
@@ -126,7 +131,7 @@ func _slot_label(index: int) -> String:
 	var mark := "▸ " if _setup_focus == SetupFocus.SLOTS and index == _slot_cursor else "  "
 	match kind:
 		MatchConfig.SLOT_KEYBOARD:
-			return "%s%d. You (keyboard)" % [mark, index + 1]
+			return "%s%d. You (keyboard / pad)" % [mark, index + 1]
 		MatchConfig.SLOT_BOT:
 			return "%s%d. Bot" % [mark, index + 1]
 		_:
@@ -152,7 +157,7 @@ func _refresh_slot_list() -> void:
 	setup_summary.text = "Filled %d/4 · bots %d  (pads deferred)" % [filled, bots]
 	var focus_hint := "modes" if _setup_focus == SetupFocus.MODES else "slots"
 	setup_hint.text = (
-		"Tab: %s · ↑↓ move · ←→ bot/empty · Enter start · Esc pauses in-match"
+		"Tab/LB: %s · ↑↓/stick move · ←→ bot/empty · A/Enter start · Start/B pause in-match"
 		% focus_hint
 	)
 
@@ -171,6 +176,7 @@ func _show_setup() -> void:
 	score_label.text = "Setup · optional bots"
 	hint_label.text = ""
 	_setup_focus = SetupFocus.MODES
+	_reset_menu_stick()
 	_apply_setup_focus()
 	_refresh_slot_list()
 	setup_list.select(_mode_index)
@@ -257,57 +263,80 @@ func _show_end_card() -> void:
 		])
 		place += 1
 	end_scores.text = "\n".join(lines)
-	end_hint.text = "Enter/Space — back to setup"
+	end_hint.text = "A / Enter / Start — back to setup"
 
 
 func _process(dt: float) -> void:
 	match _screen:
 		Screen.SETUP:
-			_process_setup()
+			_process_setup(dt)
 		Screen.PLAYING:
 			_process_playing(dt)
 		Screen.ENDED:
 			_process_ended()
 
 
-func _process_setup() -> void:
-	if Input.is_key_pressed(KEY_TAB):
-		if not _tab_held:
-			_tab_held = true
-			_setup_focus = SetupFocus.SLOTS if _setup_focus == SetupFocus.MODES else SetupFocus.MODES
-			_apply_setup_focus()
-			return
-	else:
-		_tab_held = false
+func _process_setup(dt: float) -> void:
+	if Input.is_action_just_pressed("menu_focus"):
+		_setup_focus = SetupFocus.SLOTS if _setup_focus == SetupFocus.MODES else SetupFocus.MODES
+		_apply_setup_focus()
+		return
 
-	# ↑↓ wrap inside the active list only. Tab alone switches SetupFocus.
+	var nav := _menu_nav_step(dt)
+	# ↑↓ wrap inside the active list only. menu_focus switches SetupFocus.
 	if _setup_focus == SetupFocus.MODES:
-		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+		if nav.y < 0:
 			_mode_index = (_mode_index - 1 + MODE_ORDER.size()) % MODE_ORDER.size()
 			setup_list.select(_mode_index)
-		elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+		elif nav.y > 0:
 			_mode_index = (_mode_index + 1) % MODE_ORDER.size()
 			setup_list.select(_mode_index)
 	else:
-		if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+		if nav.y < 0:
 			_slot_cursor = (_slot_cursor - 1 + 4) % 4
 			_refresh_slot_list()
-		elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+		elif nav.y > 0:
 			_slot_cursor = (_slot_cursor + 1) % 4
 			_refresh_slot_list()
-		if Input.is_action_just_pressed("ui_left") or Input.is_action_just_pressed("move_left") \
-				or Input.is_action_just_pressed("ui_right") or Input.is_action_just_pressed("move_right"):
+		if nav.x != 0:
 			_toggle_slot(_slot_cursor)
 	if Input.is_action_just_pressed("confirm"):
 		_start_match()
 
 
-var _tab_held := false
+func _menu_nav_step(dt: float) -> Vector2i:
+	## Digital D-pad / arrows via just_pressed, plus stick with return-to-center.
+	var step := Vector2i.ZERO
+	if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+		step.y = -1
+	elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+		step.y = 1
+	if Input.is_action_just_pressed("ui_left") or Input.is_action_just_pressed("move_left"):
+		step.x = -1
+	elif Input.is_action_just_pressed("ui_right") or Input.is_action_just_pressed("move_right"):
+		step.x = 1
+	if step != Vector2i.ZERO:
+		_menu_stick_armed = false
+		_menu_stick_cd = MENU_STICK_COOLDOWN
+		return step
+
+	_menu_stick_cd = maxf(0.0, _menu_stick_cd - dt)
+	var stick := Input.get_vector("move_left", "move_right", "move_up", "move_down")
+	if stick.length() < MENU_STICK_DEADZONE:
+		_menu_stick_armed = true
+		return Vector2i.ZERO
+	if not _menu_stick_armed or _menu_stick_cd > 0.0:
+		return Vector2i.ZERO
+	_menu_stick_armed = false
+	_menu_stick_cd = MENU_STICK_COOLDOWN
+	if absf(stick.x) >= absf(stick.y):
+		return Vector2i(1 if stick.x > 0.0 else -1, 0)
+	return Vector2i(0, 1 if stick.y > 0.0 else -1)
 
 
 func _toggle_slot(index: int) -> void:
 	if index <= 0:
-		# Slot 1 (index 0) stays keyboard for the local human.
+		# Slot 1 (index 0) stays the local human.
 		_slots[0] = MatchConfig.SLOT_KEYBOARD
 		_refresh_slot_list()
 		return
@@ -320,11 +349,11 @@ func _toggle_slot(index: int) -> void:
 
 func _process_playing(dt: float) -> void:
 	if _paused:
-		_process_pause_menu()
+		_process_pause_menu(dt)
 		_update_hud()
 		return
 
-	# Shared pause: Esc freezes the whole sim for every pane.
+	# Shared pause: Esc / Start / B freezes the whole sim.
 	if Input.is_action_just_pressed("pause"):
 		_set_paused(true)
 		_update_hud()
@@ -367,16 +396,23 @@ func _set_paused(paused: bool) -> void:
 	if paused:
 		_pause_cursor = 0
 		pause_list.select(_pause_cursor)
+		_reset_menu_stick()
 
 
-func _process_pause_menu() -> void:
+func _reset_menu_stick() -> void:
+	_menu_stick_cd = 0.0
+	_menu_stick_armed = true
+
+
+func _process_pause_menu(dt: float) -> void:
 	if Input.is_action_just_pressed("pause"):
 		_set_paused(false)
 		return
-	if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+	var nav := _menu_nav_step(dt)
+	if nav.y < 0:
 		_pause_cursor = (_pause_cursor - 1 + pause_list.item_count) % pause_list.item_count
 		pause_list.select(_pause_cursor)
-	elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+	elif nav.y > 0:
 		_pause_cursor = (_pause_cursor + 1) % pause_list.item_count
 		pause_list.select(_pause_cursor)
 	if Input.is_action_just_pressed("confirm"):
@@ -399,7 +435,7 @@ func _process_ended() -> void:
 
 
 func _collect_inputs() -> Dictionary:
-	# Keyboard hole(s) read WASD/arrows; bots emit Input. Pads deferred.
+	# Human hole(s) read keyboard / left stick / D-pad; bots emit Input. Extra pads deferred.
 	var inputs := {}
 	for hole_v in sim.holes:
 		var hole: Dictionary = hole_v
@@ -407,13 +443,12 @@ func _collect_inputs() -> Dictionary:
 		if bool(hole.get("is_bot", false)):
 			inputs[id] = MunchiesBot.input_for(sim, id)
 		else:
-			inputs[id] = _read_keyboard_input()
+			inputs[id] = _read_player_input()
 	return inputs
 
 
-func _read_keyboard_input() -> Vector2:
-	# WASD/arrows make a 2D stick. Holding W+D is (1,1), length √2 ≈ 1.41.
-	# Normalize when longer than 1 so diagonal speed matches full tilt, not faster.
+func _read_player_input() -> Vector2:
+	## WASD/arrows/D-pad/left stick. Diagonal keys normalize; stick keeps analog magnitude.
 	var v := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	if v.length_squared() > 1.0:
 		v = v.normalized()
@@ -804,15 +839,15 @@ func _update_hud() -> void:
 	if _paused:
 		hint_label.text = ""
 	elif sim.config.mode == MatchConfig.Mode.UNLIMITED:
-		hint_label.text = "Esc pause"
+		hint_label.text = "Esc / Start pause"
 	elif sim.match_over and not sim.config.has_end_card():
-		hint_label.text = "Esc pause"
+		hint_label.text = "Esc / Start pause"
 	else:
 		var alive_n := 0
 		for h in sim.holes:
 			if h["alive"]:
 				alive_n += 1
-		hint_label.text = "WASD · Esc pause · alive %d/%d" % [alive_n, sim.holes.size()]
+		hint_label.text = "WASD / stick · Esc/Start pause · alive %d/%d" % [alive_n, sim.holes.size()]
 
 
 func _leaderboard_text() -> String:
