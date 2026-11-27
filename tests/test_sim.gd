@@ -730,23 +730,18 @@ func _check_building_tip_and_fall() -> int:
 	if sim.alive_prop_count() != 1:
 		print("FAIL building swallowed while only tipping/falling")
 		return 1
-	# Grow hole enough for size gate + fallen cover (shifted disc).
-	var need_r: float = maxf(
-		br / MunchiesSim.PROP_EAT_RATIO + 0.05,
-		MunchiesSim.prop_cover_radius(prop) + 0.05
-	)
-	hr = need_r
+	# Grow past size gate with CoG still in hole → committed tip/fallen swallows.
+	hr = br / MunchiesSim.PROP_EAT_RATIO + 0.05
 	hole["radius"] = hr
 	hole["mass"] = hr * hr
-	# Sit on the fallen cover center so the shifted footprint is covered.
-	var cover_c: Vector2 = MunchiesSim.prop_cover_center(prop)
-	hole["x"] = cover_c.x
-	hole["y"] = cover_c.y
+	hole["x"] = 0.0
+	hole["y"] = 0.0
+	# Keep CoG inside (fallen building still at cog_x).
+	if Vector2(float(prop["x"]), float(prop["y"])).length() > hr:
+		prop["x"] = hr * 0.3
+		prop["y"] = 0.0
 	if not MunchiesSim.hole_covers_prop(hole, prop):
-		print("FAIL expected fallen cover; hr=", hr, " reff=", MunchiesSim.prop_cover_radius(prop))
-		return 1
-	if not MunchiesSim.hole_can_cover_prop(hr, prop):
-		print("FAIL hole_can_cover_prop false for swallowable fallen building")
+		print("FAIL expected CoG cover for committed/fallen building")
 		return 1
 	var swallowed := false
 	for i in 10:
@@ -754,7 +749,26 @@ func _check_building_tip_and_fall() -> int:
 			if e["kind"] == MunchiesSim.EVENT_SWALLOWED and int(e["prop_id"]) == 7:
 				swallowed = true
 	if not swallowed:
-		print("FAIL fallen building not swallowed when cover disc covered")
+		print("FAIL fallen building not swallowed with CoG in large hole")
+		return 1
+
+	# Rim tip: size gate OK, CoG near edge — must swallow after tip commits (not stuck).
+	sim.objects.clear()
+	hr = br / MunchiesSim.PROP_EAT_RATIO + 0.05
+	hole["x"] = 0.0
+	hole["y"] = 0.0
+	hole["radius"] = hr
+	hole["mass"] = hr * hr
+	var rim_x: float = hr - 0.15
+	sim.objects.append(MunchiesSim.make_prop(77, rim_x, 0.0, 3, br))
+	assert(not MunchiesSim.prop_fully_covered(rim_x, br, hr))
+	var rim_swallowed := false
+	for i in 90:
+		for e in sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0):
+			if e["kind"] == MunchiesSim.EVENT_SWALLOWED and int(e["prop_id"]) == 77:
+				rim_swallowed = true
+	if not rim_swallowed:
+		print("FAIL rim-tip building stuck; never swallowed")
 		return 1
 
 	# Fresh building: tip then move hole away before fall → recover upright.

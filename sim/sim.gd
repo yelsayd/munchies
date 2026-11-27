@@ -31,6 +31,8 @@ const BUILDING_TIP_MIN_TIER := 3
 const BUILDING_TIP_RATE := 2.4 ## rad/s while CoG is inside a hole
 const BUILDING_TIP_RECOVER := 1.6 ## rad/s spring-back when CoG is free
 const BUILDING_FALL_ANGLE := PI * 0.5 ## 90° → fallen on its side
+## After this lean, cover = CoG-in-hole (rim tips can never satisfy full-disc cover).
+const BUILDING_TIP_COMMIT := PI * 0.22
 ## Footprint multipliers — keep in sync with world_view_3d mesh sizes.
 const BUILDING_WIDTH_MULT := 1.6
 const BUILDING_HEIGHT_MULT := 2.2
@@ -491,45 +493,42 @@ static func is_building_prop(prop: Dictionary) -> bool:
 	return int(prop.get("tier", 0)) >= BUILDING_TIP_MIN_TIER
 
 
-## Cover test center. Fallen buildings shift toward tip_dir (where the mesh lands).
+## Steer / seek point for a prop (buildings: the CoG — tip pulls mass into the hole).
 static func prop_cover_center(prop: Dictionary) -> Vector2:
-	var c := Vector2(float(prop["x"]), float(prop["y"]))
-	if not bool(prop.get("fallen", false)):
-		return c
-	var tip := Vector2(float(prop.get("tip_dx", 1.0)), float(prop.get("tip_dy", 0.0)))
-	if tip.length_squared() < 0.0001:
-		tip = Vector2.RIGHT
-	else:
-		tip = tip.normalized()
-	var dims: Vector2 = building_dims(prop)
-	# Mass slides into the tip direction when it goes over — match the hinged mesh.
-	return c + tip * (dims.y * 0.4)
+	return Vector2(float(prop["x"]), float(prop["y"]))
 
 
-## Effective cover radius. Fallen uses a compact disc (not the full corner box),
-## so a hole that owns the fallen mass can finish the swallow without needing
-## city-block-sized coverage of every corner.
 static func prop_cover_radius(prop: Dictionary) -> float:
-	if not bool(prop.get("fallen", false)):
-		return float(prop["radius"])
-	var dims: Vector2 = building_dims(prop)
-	return maxf(dims.x, dims.y) * 0.42
+	return float(prop["radius"])
 
 
-## True when this hole size could cover the prop if centered on its cover center.
+## True when this hole is big enough to finish the prop (size gate).
+## Buildings only need the gate: once CoG is inside and tip commits, they swallow.
 static func hole_can_cover_prop(hole_radius: float, prop: Dictionary) -> bool:
 	if float(prop["radius"]) > hole_radius * PROP_EAT_RATIO:
 		return false
+	if is_building_prop(prop):
+		return true
 	return hole_radius >= prop_cover_radius(prop)
 
 
-## Full cover against the prop's current footprint (disc; fallen uses shifted center).
+static func building_tip_committed(prop: Dictionary) -> bool:
+	return bool(prop.get("fallen", false)) \
+		or float(prop.get("tip_angle", 0.0)) >= BUILDING_TIP_COMMIT
+
+
+## Cover test. Litter/cars/upright buildings: full disc.
+## Buildings mid-tip or fallen: CoG inside the hole (rim tips cannot satisfy disc cover).
 static func hole_covers_prop(hole: Dictionary, prop: Dictionary) -> bool:
 	var hr: float = float(hole["radius"])
-	var center: Vector2 = prop_cover_center(prop)
-	var reff: float = prop_cover_radius(prop)
-	var cdist: float = center.distance_to(Vector2(float(hole["x"]), float(hole["y"])))
-	return prop_fully_covered(cdist, reff, hr)
+	var hx: float = float(hole["x"])
+	var hy: float = float(hole["y"])
+	var px: float = float(prop["x"])
+	var py: float = float(prop["y"])
+	var cdist: float = Vector2(hx - px, hy - py).length()
+	if is_building_prop(prop) and building_tip_committed(prop):
+		return cdist <= hr
+	return prop_fully_covered(cdist, float(prop["radius"]), hr)
 
 
 func _update_building_tip(prop: Dictionary, alive: Array, dt: float) -> void:
