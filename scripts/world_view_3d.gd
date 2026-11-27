@@ -14,9 +14,15 @@ const TIER_COLORS := {
 const COL_GROUND := Color(0.18, 0.23, 0.19)
 const COL_SIDEWALK := Color(0.42, 0.44, 0.40)
 const COL_ROAD := Color(0.16, 0.17, 0.19)
+const COL_LANE := Color(0.78, 0.72, 0.42, 0.85)
 const COL_PARK := Color(0.24, 0.38, 0.24)
 const COL_BORDER := Color(0.38, 0.46, 0.40)
 const SIDEWALK_M := 2.2
+## Road top ≈ 0.085 m; hole fill/rim/flash sit clearly above so roads never occlude them.
+const HOLE_FILL_Y := 0.10
+const HOLE_RIM_Y := 0.145
+const HOLE_FLASH_Y := 0.17
+const LANE_Y := 0.095
 
 ## Set by main.gd (World3D may live under a SubViewport).
 var host: Node = null
@@ -65,7 +71,8 @@ func sync_from_sim() -> void:
 	if sim == null or sim.holes.is_empty():
 		return
 
-	var seed_key: int = hash(sim.map_half) ^ (sim.roads.size() * 17) ^ (sim.parks.size() * 31)
+	# Include a layout version so lane dashes / raised hole fill rebuild on upgrade.
+	var seed_key: int = hash(sim.map_half) ^ (sim.roads.size() * 17) ^ (sim.parks.size() * 31) ^ 3
 	if seed_key != _static_seed:
 		_rebuild_static(sim)
 		_static_seed = seed_key
@@ -122,6 +129,7 @@ func _rebuild_static(sim: MunchiesSim) -> void:
 			Vector3(road.size.x, 0.05, road.size.y),
 			COL_ROAD
 		))
+		_add_lane_dashes(road)
 
 	# Spawn pads
 	for pad_v in MunchiesSim.SPAWN_PADS:
@@ -129,6 +137,36 @@ func _rebuild_static(sim: MunchiesSim) -> void:
 		_static_root.add_child(_make_cylinder(
 			Vector3(pad.x, 0.07, pad.y), 2.2, 0.05, Color(0.32, 0.36, 0.33, 0.7)
 		))
+
+
+func _add_lane_dashes(road: Rect2) -> void:
+	## Same dash pattern as 2D world_view (meters); centers along the road midline.
+	var horizontal: bool = road.size.x >= road.size.y
+	var dash := 1.6
+	var gap := 1.2
+	var thick := 0.18
+	if horizontal:
+		var z: float = road.position.y + road.size.y * 0.5
+		var x: float = road.position.x + dash * 0.5
+		var end_x: float = road.position.x + road.size.x - dash * 0.5
+		while x < end_x:
+			_static_root.add_child(_make_box(
+				Vector3(x, LANE_Y, z),
+				Vector3(dash, 0.03, thick),
+				COL_LANE
+			))
+			x += dash + gap
+	else:
+		var x: float = road.position.x + road.size.x * 0.5
+		var z: float = road.position.y + dash * 0.5
+		var end_z: float = road.position.y + road.size.y - dash * 0.5
+		while z < end_z:
+			_static_root.add_child(_make_box(
+				Vector3(x, LANE_Y, z),
+				Vector3(thick, 0.03, dash),
+				COL_LANE
+			))
+			z += dash + gap
 
 
 func _sync_props(sim: MunchiesSim) -> void:
@@ -168,6 +206,13 @@ func _sync_holes(sim: MunchiesSim) -> void:
 		var id: int = int(hole["id"])
 		seen[id] = true
 		var root: Node3D = _hole_nodes.get(id) as Node3D
+		# Recreate if this is a pre-torus hole (rim was a flat cylinder buried under roads).
+		if root != null:
+			var rim_n: MeshInstance3D = root.get_node_or_null("Rim") as MeshInstance3D
+			if rim_n == null or not (rim_n.mesh is TorusMesh):
+				root.queue_free()
+				_hole_nodes.erase(id)
+				root = null
 		if root == null:
 			root = _make_hole_node(hole)
 			_holes_root.add_child(root)
@@ -344,51 +389,53 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Hole_%d" % int(hole["id"])
 
-	# Dark pit disc (slightly recessed).
+	# Dark fill sits ABOVE roads/sidewalks so pavement never punches through the pit.
 	var pit := MeshInstance3D.new()
 	pit.name = "Pit"
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 1.0
-	cyl.bottom_radius = 0.85
-	cyl.height = 0.35
+	cyl.bottom_radius = 1.0
+	cyl.height = 0.08
 	cyl.radial_segments = 32
 	pit.mesh = cyl
 	pit.material_override = _mat(Color(0.03, 0.03, 0.04))
-	pit.position.y = -0.05
+	pit.position.y = HOLE_FILL_Y
 	root.add_child(pit)
 
-	# Inner shadow disc
+	# Deeper inner shadow (still above road top).
 	var inner := MeshInstance3D.new()
 	inner.name = "Inner"
 	var ic := CylinderMesh.new()
 	ic.top_radius = 0.72
 	ic.bottom_radius = 0.72
-	ic.height = 0.08
+	ic.height = 0.06
 	ic.radial_segments = 24
 	inner.mesh = ic
 	inner.material_override = _mat(Color(0.01, 0.01, 0.015))
-	inner.position.y = 0.02
+	inner.position.y = HOLE_FILL_Y + 0.02
 	root.add_child(inner)
 
-	# Colored rim torus (approximated as thin flat ring cylinder).
+	# Colored rim as a real torus so it reads as a border, not a disc under roads.
 	var rim := MeshInstance3D.new()
 	rim.name = "Rim"
-	var rc := CylinderMesh.new()
-	rc.top_radius = 1.05
-	rc.bottom_radius = 1.05
-	rc.height = 0.12
-	rc.radial_segments = 32
-	rim.mesh = rc
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.90
+	torus.outer_radius = 1.06
+	torus.rings = 12
+	torus.ring_segments = 32
+	rim.mesh = torus
+	rim.position.y = HOLE_RIM_Y
 	root.add_child(rim)
 
 	var flash := MeshInstance3D.new()
 	flash.name = "Flash"
-	var fc := CylinderMesh.new()
-	fc.top_radius = 1.15
-	fc.bottom_radius = 1.15
-	fc.height = 0.06
-	fc.radial_segments = 32
-	flash.mesh = fc
+	var ft := TorusMesh.new()
+	ft.inner_radius = 0.98
+	ft.outer_radius = 1.18
+	ft.rings = 10
+	ft.ring_segments = 32
+	flash.mesh = ft
+	flash.position.y = HOLE_FLASH_Y
 	flash.material_override = _mat(Color(1, 1, 1, 0.0), true)
 	flash.visible = false
 	root.add_child(flash)
