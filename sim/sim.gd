@@ -491,34 +491,45 @@ static func is_building_prop(prop: Dictionary) -> bool:
 	return int(prop.get("tier", 0)) >= BUILDING_TIP_MIN_TIER
 
 
-## Full cover against the prop's current footprint (disc upright, oriented box if fallen).
-static func hole_covers_prop(hole: Dictionary, prop: Dictionary) -> bool:
-	var hx: float = float(hole["x"])
-	var hy: float = float(hole["y"])
-	var hr: float = float(hole["radius"])
-	var px: float = float(prop["x"])
-	var py: float = float(prop["y"])
-	var pr: float = float(prop["radius"])
-	var cdist: float = Vector2(hx - px, hy - py).length()
+## Cover test center. Fallen buildings shift toward tip_dir (where the mesh lands).
+static func prop_cover_center(prop: Dictionary) -> Vector2:
+	var c := Vector2(float(prop["x"]), float(prop["y"]))
 	if not bool(prop.get("fallen", false)):
-		return prop_fully_covered(cdist, pr, hr)
-	# Fallen: oriented ground rectangle (former height along tip_dir, width across).
-	var dims: Vector2 = building_dims(prop)
+		return c
 	var tip := Vector2(float(prop.get("tip_dx", 1.0)), float(prop.get("tip_dy", 0.0)))
 	if tip.length_squared() < 0.0001:
 		tip = Vector2.RIGHT
 	else:
 		tip = tip.normalized()
-	var perp := Vector2(-tip.y, tip.x)
-	var half_len: float = dims.y * 0.5
-	var half_wid: float = dims.x * 0.5
-	var center := Vector2(px, py)
-	for s in [-1.0, 1.0]:
-		for t in [-1.0, 1.0]:
-			var corner: Vector2 = center + tip * (half_len * s) + perp * (half_wid * t)
-			if corner.distance_to(Vector2(hx, hy)) > hr:
-				return false
-	return true
+	var dims: Vector2 = building_dims(prop)
+	# Mass slides into the tip direction when it goes over — match the hinged mesh.
+	return c + tip * (dims.y * 0.4)
+
+
+## Effective cover radius. Fallen uses a compact disc (not the full corner box),
+## so a hole that owns the fallen mass can finish the swallow without needing
+## city-block-sized coverage of every corner.
+static func prop_cover_radius(prop: Dictionary) -> float:
+	if not bool(prop.get("fallen", false)):
+		return float(prop["radius"])
+	var dims: Vector2 = building_dims(prop)
+	return maxf(dims.x, dims.y) * 0.42
+
+
+## True when this hole size could cover the prop if centered on its cover center.
+static func hole_can_cover_prop(hole_radius: float, prop: Dictionary) -> bool:
+	if float(prop["radius"]) > hole_radius * PROP_EAT_RATIO:
+		return false
+	return hole_radius >= prop_cover_radius(prop)
+
+
+## Full cover against the prop's current footprint (disc; fallen uses shifted center).
+static func hole_covers_prop(hole: Dictionary, prop: Dictionary) -> bool:
+	var hr: float = float(hole["radius"])
+	var center: Vector2 = prop_cover_center(prop)
+	var reff: float = prop_cover_radius(prop)
+	var cdist: float = center.distance_to(Vector2(float(hole["x"]), float(hole["y"])))
+	return prop_fully_covered(cdist, reff, hr)
 
 
 func _update_building_tip(prop: Dictionary, alive: Array, dt: float) -> void:

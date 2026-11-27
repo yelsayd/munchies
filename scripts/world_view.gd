@@ -83,7 +83,8 @@ func _draw() -> void:
 		var t: Dictionary = tw
 		var pos := Vector2(float(t["x"]), float(t["y"])) * PIXELS_PER_METER
 		var r: float = float(t["radius"]) * float(t["scale"]) * PIXELS_PER_METER
-		if r < 0.5:
+		# Skip tiny polys — Godot triangulation fails on degenerate car/building quads.
+		if r < 2.0:
 			continue
 		var col: Color = TIER_COLORS.get(int(t["tier"]), Color.WHITE) as Color
 		col.a = float(t["scale"])
@@ -326,27 +327,32 @@ func _draw_street_prop(pos: Vector2, r: float, col: Color, prop_id: int) -> void
 
 func _draw_car(pos: Vector2, r: float, col: Color, facing: float) -> void:
 	## Top-down car: tapered body, glass cabin, wheels. Facing aligns to nearest road.
+	if r < 2.0 or not is_finite(facing):
+		draw_circle(pos, maxf(r, 1.0), col)
+		return
 	var body_len := r * 2.55
 	var body_w := r * 1.2
 	var axis := Vector2(cos(facing), sin(facing))
+	if axis.length_squared() < 0.0001:
+		axis = Vector2.RIGHT
 	var perp := Vector2(-axis.y, axis.x)
 
-	draw_colored_polygon(
+	_draw_poly_safe(
 		_oriented_rect(pos + Vector2(r * 0.06, r * 0.06), body_len * 1.02, body_w * 1.08, axis, perp),
 		Color(0, 0, 0, 0.25 * col.a)
 	)
 	# Body (slightly rounded via end caps)
-	draw_colored_polygon(_oriented_rect(pos, body_len, body_w, axis, perp), col)
+	_draw_poly_safe(_oriented_rect(pos, body_len, body_w, axis, perp), col)
 	draw_circle(pos + axis * (body_len * 0.42), body_w * 0.48, col)
 	draw_circle(pos - axis * (body_len * 0.42), body_w * 0.42, col)
 	# Cabin glass
 	var cabin_c := pos + axis * (r * 0.12)
-	draw_colored_polygon(
+	_draw_poly_safe(
 		_oriented_rect(cabin_c, r * 1.05, body_w * 0.72, axis, perp),
 		Color(0.62, 0.78, 0.90, col.a)
 	)
 	# Nose stripe so facing reads
-	draw_colored_polygon(
+	_draw_poly_safe(
 		_oriented_rect(pos + axis * (body_len * 0.38), r * 0.35, body_w * 0.55, axis, perp),
 		col.lightened(0.18)
 	)
@@ -359,6 +365,23 @@ func _draw_car(pos: Vector2, r: float, col: Color, facing: float) -> void:
 	draw_circle(pos + axis * long_off - perp * lat_off, wheel_r, wheel_col)
 	draw_circle(pos - axis * long_off + perp * lat_off, wheel_r, wheel_col)
 	draw_circle(pos - axis * long_off - perp * lat_off, wheel_r, wheel_col)
+
+
+func _draw_poly_safe(pts: PackedVector2Array, col: Color) -> void:
+	if pts.size() < 3:
+		return
+	for p in pts:
+		if not is_finite(p.x) or not is_finite(p.y):
+			return
+	# Degenerate / near-zero area quads trip canvas triangulation.
+	var area2: float = 0.0
+	for i in pts.size():
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % pts.size()]
+		area2 += a.x * b.y - b.x * a.y
+	if absf(area2) < 0.5:
+		return
+	draw_colored_polygon(pts, col)
 
 
 func _draw_building(pos: Vector2, r: float, col: Color, is_block: bool) -> void:
@@ -411,12 +434,13 @@ func _draw_building_tipped(prop: Dictionary, pos: Vector2, r: float, col: Color,
 	var length_px: float = lerpf(upright, height_px, t)
 	var width_draw: float = lerpf(upright, width_px, t)
 	var pts := _oriented_rect(pos, length_px, width_draw, tip, perp)
-	draw_colored_polygon(pts, col.darkened(0.05))
-	draw_polyline(pts + PackedVector2Array([pts[0]]), col.darkened(0.35), 2.0, true)
+	_draw_poly_safe(pts, col.darkened(0.05))
+	if pts.size() >= 2:
+		draw_polyline(pts + PackedVector2Array([pts[0]]), col.darkened(0.35), 2.0, true)
 	# Roof / side plate accent
 	var inset_len: float = length_px * 0.72
 	var inset_w: float = width_draw * 0.55
-	draw_colored_polygon(
+	_draw_poly_safe(
 		_oriented_rect(pos, inset_len, inset_w, tip, perp),
 		col.lightened(0.1 if t < 0.85 else 0.02)
 	)

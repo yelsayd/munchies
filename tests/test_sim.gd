@@ -730,16 +730,23 @@ func _check_building_tip_and_fall() -> int:
 	if sim.alive_prop_count() != 1:
 		print("FAIL building swallowed while only tipping/falling")
 		return 1
-	# Grow hole enough for size gate + fallen box cover at center.
-	var dims: Vector2 = MunchiesSim.building_dims(prop)
-	var corner_reach: float = Vector2(dims.y * 0.5, dims.x * 0.5).length()
-	hr = maxf(br / MunchiesSim.PROP_EAT_RATIO + 0.05, corner_reach + 0.05)
+	# Grow hole enough for size gate + fallen cover (shifted disc).
+	var need_r: float = maxf(
+		br / MunchiesSim.PROP_EAT_RATIO + 0.05,
+		MunchiesSim.prop_cover_radius(prop) + 0.05
+	)
+	hr = need_r
 	hole["radius"] = hr
 	hole["mass"] = hr * hr
-	prop["x"] = 0.0
-	prop["y"] = 0.0
+	# Sit on the fallen cover center so the shifted footprint is covered.
+	var cover_c: Vector2 = MunchiesSim.prop_cover_center(prop)
+	hole["x"] = cover_c.x
+	hole["y"] = cover_c.y
 	if not MunchiesSim.hole_covers_prop(hole, prop):
-		print("FAIL expected fallen cover at center; hr=", hr, " reach=", corner_reach)
+		print("FAIL expected fallen cover; hr=", hr, " reff=", MunchiesSim.prop_cover_radius(prop))
+		return 1
+	if not MunchiesSim.hole_can_cover_prop(hr, prop):
+		print("FAIL hole_can_cover_prop false for swallowable fallen building")
 		return 1
 	var swallowed := false
 	for i in 10:
@@ -747,12 +754,14 @@ func _check_building_tip_and_fall() -> int:
 			if e["kind"] == MunchiesSim.EVENT_SWALLOWED and int(e["prop_id"]) == 7:
 				swallowed = true
 	if not swallowed:
-		print("FAIL fallen building not swallowed when box covered")
+		print("FAIL fallen building not swallowed when cover disc covered")
 		return 1
 
 	# Fresh building: tip then move hole away before fall → recover upright.
 	sim.objects.clear()
 	hr = br * 0.55
+	hole["x"] = 0.0
+	hole["y"] = 0.0
 	hole["radius"] = hr
 	hole["mass"] = hr * hr
 	sim.objects.append(MunchiesSim.make_prop(8, 0.0, 0.0, 3, br))

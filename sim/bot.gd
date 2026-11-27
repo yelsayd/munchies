@@ -38,20 +38,20 @@ static func input_for(sim: MunchiesSim, hole_id: int) -> Vector2:
 			if d < danger and d > 0.001:
 				flee += (pos - op).normalized() * ((danger - d) / danger)
 
-	# Seek nearest legal food.
+	# Seek nearest food this hole can actually cover (skips fallen buildings that are too big).
 	var best_food := Vector2.ZERO
 	var best_dist: float = INF
 	for prop_v in sim.objects:
 		var prop: Dictionary = prop_v
 		if not bool(prop["alive"]):
 			continue
-		var pr: float = float(prop["radius"])
-		if pr > hr * MunchiesSim.PROP_EAT_RATIO:
+		if not MunchiesSim.hole_can_cover_prop(hr, prop):
 			continue
 		var claimed: int = int(prop["claimed_by"])
 		if claimed != -1 and claimed != hole_id:
 			continue
-		var pp := Vector2(float(prop["x"]), float(prop["y"]))
+		# Steer toward the cover center (fallen mass sits toward tip_dir).
+		var pp: Vector2 = MunchiesSim.prop_cover_center(prop)
 		var d: float = pos.distance_to(pp)
 		if d < best_dist:
 			best_dist = d
