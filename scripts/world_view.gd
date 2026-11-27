@@ -97,13 +97,29 @@ func _draw() -> void:
 		# Skip tiny polys — Godot triangulation fails on degenerate car/building quads.
 		if r < 2.0:
 			continue
-		var col: Color = TIER_COLORS.get(int(t["tier"]), Color.WHITE) as Color
-		col.a = alpha
 		var tier: int = int(t["tier"])
-		if bool(t.get("fallen", false)) or float(t.get("tip_angle", 0.0)) > 0.05:
+		var role: int = int(t.get("role", MunchiesSim.ROLE_PROP))
+		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
+		if t.get("body_color", null) != null:
+			col = t["body_color"] as Color
+		col.a = alpha
+		# People / street clutter keep silhouette (no orange tipped slab).
+		var keep_upright: bool = (
+			role == MunchiesSim.ROLE_PERSON
+			or role == MunchiesSim.ROLE_LAMP
+			or tier <= 1
+		)
+		if keep_upright:
+			if role == MunchiesSim.ROLE_LAMP:
+				_draw_lamp(pos, r)
+			elif role == MunchiesSim.ROLE_PERSON:
+				_draw_person(pos, r, col, 0.0)
+			else:
+				_draw_tier_shape(tier, pos, r, col, int(t.get("prop_id", 0)), 0.0, int(t.get("vehicle", 0)))
+		elif bool(t.get("fallen", false)) or float(t.get("tip_angle", 0.0)) > 0.05:
 			_draw_prop_tipped(t, pos, r, col, tier)
 		else:
-			_draw_tier_shape(tier, pos, r, col, 0, 0.0)
+			_draw_tier_shape(tier, pos, r, col, int(t.get("prop_id", 0)), 0.0, int(t.get("vehicle", 0)))
 
 	# All holes (alive) on top; dead holes are invisible until respawn.
 	for hole_v in sim.holes:

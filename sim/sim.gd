@@ -1,7 +1,7 @@
 class_name MunchiesSim
 extends RefCounted
 ## Pure simulation for Munchies. No scene tree, no physics nodes.
-## Phase 6 couch: setup slots → same step for all panes; claims exclusive; modes own respawn/elim.
+## Couch match: setup slots → same step for all panes; claims exclusive; modes own respawn/elim.
 
 const START_RADIUS := 1.0
 const START_MASS := 1.0
@@ -232,8 +232,8 @@ func setup_empty(world_seed: int = 1, half: float = 30.0) -> void:
 	holes.append(make_hole(_alloc_id(), 0.0, 0.0, false, 0))
 
 
-## Compact Phase 1 layout kept for regression checks.
-func setup_phase1(world_seed: int = 1) -> void:
+## Compact litter layout kept for regression checks.
+func setup_compact(world_seed: int = 1) -> void:
 	setup_empty(world_seed, 30.0)
 	_scatter_props(0, TIER0_RADIUS, 80, Vector2(0, 0), 12.0, START_RADIUS * 2.5)
 	_scatter_props(0, TIER0_RADIUS, 40, Vector2(14, -10), 8.0, 0.0)
@@ -245,18 +245,18 @@ func setup_phase1(world_seed: int = 1) -> void:
 		objects.append(make_prop(_alloc_id(), cos(a) * d, sin(a) * d, 1, 1.15))
 
 
-## Phase 2: 160 m hand-laid map, five tiers, four corner spawns.
-func setup_phase2(world_seed: int = 42, spawn_pad: int = 0) -> void:
+## Full 160 m hand-laid map, five tiers, four corner spawns.
+func setup_full(world_seed: int = 42, spawn_pad: int = 0) -> void:
 	config = MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 1)
-	_layout_phase2_map(world_seed)
+	_layout_map(world_seed)
 	var pad: Vector2 = SPAWN_PADS[clampi(spawn_pad, 0, SPAWN_PADS.size() - 1)]
 	holes.append(make_hole(_alloc_id(), pad.x, pad.y, false, 0))
 
 
-## Phase 6: match from setup slots (keyboard / bot / empty). Pads deferred.
+## Match from setup slots (keyboard / bot / empty). Pads deferred.
 func setup_match(cfg: MatchConfig, world_seed: int = 42) -> void:
 	config = cfg
-	_layout_phase2_map(world_seed)
+	_layout_map(world_seed)
 	var kinds: PackedStringArray = cfg.slots
 	if kinds.is_empty():
 		kinds = MatchConfig.default_slots(clampi(cfg.hole_count, 1, 4))
@@ -292,7 +292,7 @@ func _shuffled_bot_names() -> PackedStringArray:
 	return out
 
 
-func _layout_phase2_map(world_seed: int) -> void:
+func _layout_map(world_seed: int) -> void:
 	_rng.seed = world_seed
 	tick = 0
 	elapsed = 0.0

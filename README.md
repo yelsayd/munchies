@@ -1,6 +1,6 @@
 # Munchies
 
-Local macOS hole-swallow game (Godot 4). **Phase 6** is the first couch match on `main`: setup screen, four slots (keyboard + optional bots; pads deferred), shared end card. A **3D presentation spike** skins the same 2D sim with meshes + a tilted camera (default view).
+Local macOS hole-swallow game (Godot 4). Couch match on `main`: setup screen, four slots (keyboard + optional bots; pads deferred), shared end card. A **3D view** skins the same 2D sim with meshes + a tilted camera (default).
 
 ## Requirements
 
@@ -56,7 +56,7 @@ Slot **1** is always the keyboard human (**You**). Empty slots stay empty; bots 
 | 3 | quadrants (one blank) |
 | 4 | quadrants |
 
-Each 2D pane follows its hole with Phase 2 camera rules. One shared sim — every pane sees the same swallow. **3D mode** always uses one pane (keyboard hole); multi-pane 3D is deferred.
+Each 2D pane follows its hole with the shared camera rules. One shared sim — every pane sees the same swallow. **3D mode** always uses one pane (keyboard hole); multi-pane 3D is deferred.
 
 ### Modes
 

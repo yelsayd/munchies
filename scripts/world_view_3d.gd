@@ -19,9 +19,9 @@ const COL_PARK := Color(0.24, 0.38, 0.24)
 const COL_BORDER := Color(0.38, 0.46, 0.40)
 const SIDEWALK_M := 2.2
 ## Road top ≈ 0.085 m; hole fill/rim/flash sit clearly above so roads never occlude them.
-const HOLE_FILL_Y := 0.10
-const HOLE_RIM_Y := 0.145
-const HOLE_FLASH_Y := 0.17
+const HOLE_FILL_Y := 0.12
+const HOLE_RIM_Y := 0.16
+const HOLE_FLASH_Y := 0.185
 const LANE_Y := 0.095
 
 ## Set by main.gd (World3D may live under a SubViewport).
@@ -288,13 +288,13 @@ func _sync_holes(sim: MunchiesSim) -> void:
 		var id: int = int(hole["id"])
 		seen[id] = true
 		var root: Node3D = _hole_nodes.get(id) as Node3D
-		# Recreate if rim is not the current flat-ring ArrayMesh (old cylinder/torus rims).
+		# Recreate if rim is not the current sealed flat-ring (old cylinder/torus / gap rims).
 		if root != null:
 			var rim_n: MeshInstance3D = root.get_node_or_null("Rim") as MeshInstance3D
 			var needs_rebuild: bool = (
 				rim_n == null
 				or not (rim_n.mesh is ArrayMesh)
-				or not bool(rim_n.get_meta("flat_ring", false))
+				or int(rim_n.get_meta("rim_v", 0)) < 2
 				or root.get_node_or_null("Name") == null
 			)
 			if needs_rebuild:
@@ -333,6 +333,10 @@ func _sync_tweens() -> void:
 		var scale_v: float = float(tw.get("scale", 1.0))
 		var r: float = float(tw["radius"])
 		var tier: int = int(tw["tier"])
+		var role: int = int(tw.get("role", MunchiesSim.ROLE_PROP))
+		var body_col: Variant = tw.get("body_color", null)
+		if body_col == null:
+			body_col = TIER_COLORS.get(tier, Color.WHITE)
 		var fake := {
 			"id": int(tw.get("prop_id", 0)),
 			"x": float(tw["x"]),
@@ -345,20 +349,32 @@ func _sync_tweens() -> void:
 			"fallen": bool(tw.get("fallen", false)),
 			"tip_dx": float(tw.get("tip_dx", 1.0)),
 			"tip_dy": float(tw.get("tip_dy", 0.0)),
-			"role": int(tw.get("role", MunchiesSim.ROLE_PROP)),
+			"role": role,
 			"vehicle": int(tw.get("vehicle", 0)),
-			"body_color": tw.get("body_color", TIER_COLORS.get(tier, Color.WHITE)),
+			"body_color": body_col,
 		}
 		var node := _make_prop_node(fake)
 		_apply_prop_alpha(node, alpha)
 		_tweens_root.add_child(node)
 		var drop: float = float(tw.get("drop", 0.0))
-		# Freeze XZ; tip pose + fall straight down (no slide toward hole center).
+		var h: float = _prop_height(tier, r * scale_v, fake)
 		var face_yaw := 0.0
-		if tier == 2 and host != null and host.sim != null:
+		if (tier == 2 or role == MunchiesSim.ROLE_PERSON) and host != null and host.sim != null:
 			face_yaw = -_prop_facing(fake, host.sim as MunchiesSim)
-		_place_prop_tipped(node, fake, _prop_height(tier, r * scale_v, fake), face_yaw)
-		node.position.y -= drop
+		# People / street clutter keep their upright silhouette while dropping —
+		# tipping them reads as a horizontal orange slab.
+		var keep_upright: bool = (
+			role == MunchiesSim.ROLE_PERSON
+			or role == MunchiesSim.ROLE_LAMP
+			or tier <= 1
+		)
+		if keep_upright:
+			node.transform = Transform3D.IDENTITY
+			node.position = Vector3(float(fake["x"]), h * 0.5 - drop, float(fake["y"]))
+			node.rotation = Vector3(0.0, face_yaw, 0.0)
+		else:
+			_place_prop_tipped(node, fake, h, face_yaw)
+			node.position.y -= drop
 		_tween_nodes.append(node)
 
 
@@ -708,14 +724,15 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Hole_%d" % int(hole["id"])
 
-	# Dark fill sits ABOVE roads/sidewalks so pavement never punches through the pit.
+	# Dark fill sits ABOVE roads/sidewalks. Oversized vs rim-inner so pavement
+	# cannot peek between the black disc and the colored ring under a tilt.
 	var pit := MeshInstance3D.new()
 	pit.name = "Pit"
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 1.0
-	cyl.bottom_radius = 1.0
-	cyl.height = 0.08
-	cyl.radial_segments = 64
+	cyl.top_radius = 1.04
+	cyl.bottom_radius = 1.04
+	cyl.height = 0.10
+	cyl.radial_segments = 96
 	pit.mesh = cyl
 	pit.material_override = _mat(Color(0.03, 0.03, 0.04))
 	pit.position.y = HOLE_FILL_Y
@@ -728,24 +745,26 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	ic.top_radius = 0.72
 	ic.bottom_radius = 0.72
 	ic.height = 0.06
-	ic.radial_segments = 48
+	ic.radial_segments = 64
 	inner.mesh = ic
 	inner.material_override = _mat(Color(0.01, 0.01, 0.015))
 	inner.position.y = HOLE_FILL_Y + 0.02
 	root.add_child(inner)
 
-	# Flat annular rim — high segment count reads as a smooth circle (torus looked faceted).
+	# Flat annular rim — inner edge sits on top of the oversized pit (no ground gap).
 	var rim := MeshInstance3D.new()
 	rim.name = "Rim"
-	rim.mesh = _make_flat_ring_mesh(0.92, 1.08, 96)
+	rim.mesh = _make_flat_ring_mesh(0.98, 1.12, 96)
 	rim.set_meta("flat_ring", true)
+	rim.set_meta("rim_v", 2)
 	rim.position.y = HOLE_RIM_Y
 	root.add_child(rim)
 
 	var flash := MeshInstance3D.new()
 	flash.name = "Flash"
-	flash.mesh = _make_flat_ring_mesh(0.98, 1.16, 96)
+	flash.mesh = _make_flat_ring_mesh(1.02, 1.20, 96)
 	flash.set_meta("flat_ring", true)
+	flash.set_meta("rim_v", 2)
 	flash.position.y = HOLE_FLASH_Y
 	flash.material_override = _mat(Color(1, 1, 1, 0.0), true)
 	flash.visible = false

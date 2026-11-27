@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://bmunchiesphase1"]
+[gd_scene load_steps=7 format=3 uid="uid://bmunchiesmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world_view.gd" id="2_world"]
@@ -89,7 +89,7 @@ theme_override_constants/separation = 4
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 1)
 theme_override_font_sizes/font_size = 18
-text = "Munchies — Phase 6"
+text = "Munchies"
 
 [node name="Score" type="Label" parent="HUD/LeftPanel/Margin/VBox"]
 layout_mode = 2

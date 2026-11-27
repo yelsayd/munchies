@@ -1,8 +1,8 @@
 extends Node2D
-## Phase 6 view: setup (modes + slot list + optional bots) → couch split-screen.
+## Setup (modes + slot list + optional bots) → couch split-screen.
 ## Slot 0 = keyboard; other filled slots = bots until pads exist. Esc pauses all.
 ## Unlimited never shows a clock or score target. Shared end card for ending modes.
-## 3D spike: presentation-only World3D reads sim each frame. F3 toggles 2D/3D.
+## 3D: presentation-only World3D reads sim each frame. F3 toggles 2D/3D.
 ## Multi-pane 3D is deferred — 3D mode uses one pane following the keyboard hole.
 
 const PIXELS_PER_METER := 24.0
@@ -208,7 +208,7 @@ func _show_setup() -> void:
 	end_panel.visible = false
 	timer_panel.visible = false
 	left_panel.visible = true
-	title_label.text = "Munchies — Phase 6"
+	title_label.text = "Munchies"
 	score_label.text = "Setup · optional bots · F3 toggles 2D/3D"
 	hint_label.text = ""
 	_setup_focus = SetupFocus.MODES
@@ -491,6 +491,10 @@ func _handle_events(events: Array) -> void:
 				"y": float(ev.get("y", 0.0)),
 				"radius": float(ev.get("radius", 0.25)),
 				"tier": int(ev.get("tier", 0)),
+				"prop_id": int(ev.get("prop_id", 0)),
+				"role": int(ev.get("role", MunchiesSim.ROLE_PROP)),
+				"vehicle": int(ev.get("vehicle", MunchiesSim.VEHICLE_SEDAN)),
+				"body_color": ev.get("body_color"),
 				"scale": 1.0,
 				"alpha": 1.0,
 				"drop": 0.0, ## meters straight down into the pit
