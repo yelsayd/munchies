@@ -15,7 +15,7 @@ func _init() -> void:
 	failed += _check_litter_swallow_and_grow()
 	failed += _check_slowdown()
 	failed += _check_map_clamp()
-	failed += _check_full_map()
+	failed += _check_city_map()
 	failed += _check_spawn_food_nearby()
 	failed += _check_claims_closest()
 	failed += _check_claim_sticks_on_contest()
@@ -48,7 +48,7 @@ func _init() -> void:
 
 func _check_start_state() -> int:
 	var sim := MunchiesSim.new()
-	sim.setup_compact(7)
+	sim.setup_map(7)
 	var hole := sim.player_hole()
 	if not is_equal_approx(float(hole["radius"]), 1.0):
 		print("FAIL start radius: ", hole["radius"])
@@ -145,7 +145,7 @@ func _check_slowdown() -> int:
 
 func _check_map_clamp() -> int:
 	var sim := MunchiesSim.new()
-	sim.setup_full(1, 0)
+	sim.setup_map(1, 0)
 	var hole := sim.player_hole()
 	hole["x"] = sim.map_half + 10.0
 	hole["y"] = 0.0
@@ -162,9 +162,9 @@ func _check_map_clamp() -> int:
 	return 0
 
 
-func _check_full_map() -> int:
+func _check_city_map() -> int:
 	var sim := MunchiesSim.new()
-	sim.setup_full(42, 0)
+	sim.setup_map(42, 0)
 	if not is_equal_approx(sim.map_half, 80.0):
 		print("FAIL map_half expected 80, got ", sim.map_half)
 		return 1
@@ -212,7 +212,7 @@ func _check_full_map() -> int:
 	if Vector2(float(hole["x"]), float(hole["y"])).distance_to(spawn) > 0.1:
 		print("FAIL hole not on spawn pad 0")
 		return 1
-	print("ok full map tiers=", counts)
+	print("ok city map tiers=", counts)
 	return 0
 
 
@@ -652,7 +652,7 @@ func _check_bot_hunts_smaller_hole() -> int:
 
 func _check_vehicles_drive() -> int:
 	var sim := MunchiesSim.new()
-	sim.setup_full(42, 0)
+	sim.setup_map(42, 0)
 	var car: Dictionary = {}
 	for p in sim.objects:
 		if int(p["tier"]) == 2:
@@ -678,7 +678,7 @@ func _check_vehicles_drive() -> int:
 
 func _check_spawn_no_overlap() -> int:
 	var sim := MunchiesSim.new()
-	sim.setup_full(7, 0)
+	sim.setup_map(7, 0)
 	for i in sim.objects.size():
 		var a: Dictionary = sim.objects[i]
 		if not bool(a["alive"]):
@@ -700,7 +700,7 @@ func _check_spawn_no_overlap() -> int:
 
 func _check_people_and_lamps() -> int:
 	var sim := MunchiesSim.new()
-	sim.setup_full(11, 0)
+	sim.setup_map(11, 0)
 	var lamps := 0
 	var people := 0
 	var person: Dictionary = {}

@@ -1,5 +1,5 @@
 extends Node3D
-## Presentation-only 3D skin over the 2D sim.
+## Presentation-only 3D skin over the sim.
 ## Reads sim x/y/radius each frame; never writes claims, modes, or step state.
 ## Y-up: sim (x, y) → world (x, 0, y). One unit = one meter.
 
@@ -187,7 +187,7 @@ func _add_ground_texture(half: float) -> void:
 
 
 func _add_city_lots(half: float) -> void:
-	## Lot pads between streets — same idea as 2D city blocks.
+	## Lot pads between streets.
 	var step := 16.0
 	var margin := 6.0
 	var x: float = -half + margin
@@ -216,7 +216,7 @@ func _add_city_lots(half: float) -> void:
 
 
 func _add_lane_dashes(road: Rect2) -> void:
-	## Same dash pattern as 2D world_view (meters); centers along the road midline.
+	## Lane dashes along the road midline (meters).
 	var horizontal: bool = road.size.x >= road.size.y
 	var dash := 1.6
 	var gap := 1.2

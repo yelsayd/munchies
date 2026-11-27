@@ -232,21 +232,8 @@ func setup_empty(world_seed: int = 1, half: float = 30.0) -> void:
 	holes.append(make_hole(_alloc_id(), 0.0, 0.0, false, 0))
 
 
-## Compact litter layout kept for regression checks.
-func setup_compact(world_seed: int = 1) -> void:
-	setup_empty(world_seed, 30.0)
-	_scatter_props(0, TIER0_RADIUS, 80, Vector2(0, 0), 12.0, START_RADIUS * 2.5)
-	_scatter_props(0, TIER0_RADIUS, 40, Vector2(14, -10), 8.0, 0.0)
-	_scatter_props(1, TIER1_RADIUS, 36, Vector2(-8, 10), 14.0, 0.0)
-	_scatter_props(1, TIER1_RADIUS, 20, Vector2(16, 12), 10.0, 0.0)
-	for i in 5:
-		var a: float = _rng.randf() * TAU
-		var d: float = 5.0 + _rng.randf() * 5.0
-		objects.append(make_prop(_alloc_id(), cos(a) * d, sin(a) * d, 1, 1.15))
-
-
-## Full 160 m hand-laid map, five tiers, four corner spawns.
-func setup_full(world_seed: int = 42, spawn_pad: int = 0) -> void:
+## Single-player sandbox on the city map (tests / unlimited smoke).
+func setup_map(world_seed: int = 42, spawn_pad: int = 0) -> void:
 	config = MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 1)
 	_layout_map(world_seed)
 	var pad: Vector2 = SPAWN_PADS[clampi(spawn_pad, 0, SPAWN_PADS.size() - 1)]
