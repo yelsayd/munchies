@@ -13,8 +13,8 @@ func _run() -> void:
 extends Node
 var sim
 var swallow_tweens: Array = []
-var swallow_flash: float = 0.0
-var swallow_flash_hole: int = -1
+var grow_flash: float = 0.0
+var grow_flash_hole: int = -1
 """
 	host_script.reload()
 	var host := Node.new()

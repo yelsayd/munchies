@@ -9,6 +9,9 @@ const PIXELS_PER_METER := 24.0
 const CAMERA_SETTLE := 0.2
 const HOLE_SCREEN_FRACTION := 0.20 ## diameter vs shorter pane side
 const SWALLOW_TWEEN_SEC := 0.38
+## Rim pulse only after the hole grows by this much (not every swallow nibble).
+const GROW_FLASH_STEP := 0.12
+const GROW_FLASH_SEC := 0.34
 ## How far (meters) a swallowed prop falls straight down (no pull toward hole center).
 const SWALLOW_DROP_M := 5.5
 const PANE_GAP := 3.0
@@ -57,8 +60,11 @@ var use_3d_view := true
 
 ## Presentation-only swallow ghosts: {x,y,radius,tier,scale,age,target_x,target_y,hole_id}
 var swallow_tweens: Array = []
-var swallow_flash: float = 0.0
-var swallow_flash_hole: int = -1
+## Rim grow flash (seconds remaining) — not tied to every swallow.
+var grow_flash: float = 0.0
+var grow_flash_hole: int = -1
+## Last radius that triggered a grow flash, per hole id.
+var _last_grow_radius: Dictionary = {}
 
 ## Per-pane camera / overlay state.
 ## 2D: {hole_id, camera, cam_pos, cam_zoom, score_label, radius_label, viewport, frame}
@@ -241,7 +247,12 @@ func _start_match() -> void:
 	sim = MunchiesSim.new()
 	sim.setup_match(cfg, 42)
 	swallow_tweens.clear()
-	swallow_flash = 0.0
+	grow_flash = 0.0
+	grow_flash_hole = -1
+	_last_grow_radius.clear()
+	for h_v in sim.holes:
+		var h: Dictionary = h_v
+		_last_grow_radius[int(h["id"])] = float(h["radius"])
 	_paused = false
 	_screen = Screen.PLAYING
 	setup_panel.visible = false
@@ -356,6 +367,7 @@ func _process_playing(dt: float) -> void:
 		var inputs := _collect_inputs()
 		var events: Array = sim.step(inputs, dt)
 		_handle_events(events)
+		_check_grow_flash()
 		if sim.match_over and sim.config != null and sim.config.has_end_card():
 			_show_end_card()
 
@@ -419,8 +431,7 @@ func _handle_events(events: Array) -> void:
 				"tip_dx": float(ev.get("tip_dx", 1.0)),
 				"tip_dy": float(ev.get("tip_dy", 0.0)),
 			})
-			swallow_flash = 0.18
-			swallow_flash_hole = hid
+			# Rim flash is grow-only — swallow still gets an audio blip.
 			if blip_player.stream != null:
 				blip_player.pitch_scale = 1.0 + 0.04 * float(ev.get("tier", 0))
 				blip_player.play()
@@ -430,9 +441,25 @@ func _handle_events(events: Array) -> void:
 				blip_player.play()
 
 
+func _check_grow_flash() -> void:
+	## Pulse the rim when radius crosses the next grow step (not every nibble).
+	for hole_v in sim.holes:
+		var hole: Dictionary = hole_v
+		var hid: int = int(hole["id"])
+		var r: float = float(hole["radius"])
+		if not _last_grow_radius.has(hid):
+			_last_grow_radius[hid] = r
+			continue
+		var prev: float = float(_last_grow_radius[hid])
+		if r - prev >= GROW_FLASH_STEP:
+			grow_flash = GROW_FLASH_SEC
+			grow_flash_hole = hid
+			_last_grow_radius[hid] = r
+
+
 func _tick_presentation(dt: float) -> void:
-	if swallow_flash > 0.0:
-		swallow_flash = maxf(0.0, swallow_flash - dt)
+	if grow_flash > 0.0:
+		grow_flash = maxf(0.0, grow_flash - dt)
 
 	var keep: Array = []
 	for tw_v in swallow_tweens:
@@ -831,12 +858,16 @@ func _update_hud() -> void:
 		return
 	title_label.text = "Munchies — %s" % sim.config.label()
 	mode_line.text = _mode_line_text()
-	# Shared band: mode line only. Per-hole score/radius live in each pane.
-	if use_3d_view:
+	if sim.holes.size() > 1:
+		# Multiplayer: shared score band becomes a ranked leaderboard.
+		score_label.text = _leaderboard_text()
+		radius_label.text = ""
+	elif use_3d_view:
 		score_label.text = "3D spike · 1 pane (split deferred) · F3 → 2D"
+		radius_label.text = ""
 	else:
-		score_label.text = "2D split · %s · F3 → 3D" % _pane_layout_label(sim.holes.size())
-	radius_label.text = ""
+		score_label.text = "2D · F3 → 3D"
+		radius_label.text = ""
 	if _paused:
 		hint_label.text = "Paused (all panes) — Esc to resume"
 	elif sim.config.mode == MatchConfig.Mode.UNLIMITED:
@@ -850,6 +881,25 @@ func _update_hud() -> void:
 			if h["alive"]:
 				alive_n += 1
 		hint_label.text = "WASD/arrows (You) · Esc pause · F3 view · alive %d/%d" % [alive_n, sim.holes.size()]
+
+
+func _leaderboard_text() -> String:
+	var ranked: Array = sim.holes.duplicate()
+	ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a["score"]) > int(b["score"])
+	)
+	var lines := PackedStringArray()
+	for i in ranked.size():
+		var hole: Dictionary = ranked[i]
+		var place: int = i + 1
+		var alive_mark: String = "" if bool(hole["alive"]) else " · out"
+		lines.append("%d. %s  %d%s" % [
+			place,
+			str(hole.get("name", "?")),
+			int(hole["score"]),
+			alive_mark,
+		])
+	return "\n".join(lines)
 
 
 func _mode_line_text() -> String:

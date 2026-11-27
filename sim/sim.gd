@@ -10,8 +10,18 @@ const START_MASS := 1.0
 const SCORE_SCALE := 10.0
 
 const SPEED_BASE := 14.0
-const SPEED_FLOOR := 0.32
+## Gentler than 1/r: pow(start/r, exp). Lower exp → big holes stay faster.
+const SPEED_RADIUS_EXP := 0.55
+const SPEED_FLOOR := 0.45
 const STEER_TAU := 0.15
+
+## Funny names for bot holes (unique per match).
+const FUNNY_BOT_NAMES := [
+	"Chonkus", "Void Goblin", "Pavement Pete", "Snack Hole", "Mr. Munch",
+	"Bitty Abyss", "Gulpina", "The Vacuum", "Lil Sinkhole", "Nom Nom",
+	"Asphalt Annie", "Curb Crusher", "Pothole Paul", "Yum Gap", "Big Sip",
+	"Munchkin", "Holey Moley", "Gulp-o-Tron", "Sir Swallows", "Nibblet",
+]
 
 # You can eat a prop only if it is a bit smaller than you.
 # Gate: prop.radius ≤ hole.radius × 0.95 (not quite equal size).
@@ -105,7 +115,17 @@ var _pending_hole_respawns: Array = [] ## {id, at}
 var _pending_prop_spawns: Array = [] ## {tier, at, x, y}
 
 
-static func make_hole(id: int, x: float, y: float, is_bot: bool = false, slot: int = 0) -> Dictionary:
+static func make_hole(
+	id: int,
+	x: float,
+	y: float,
+	is_bot: bool = false,
+	slot: int = 0,
+	hole_name: String = ""
+) -> Dictionary:
+	var nm: String = hole_name
+	if nm.is_empty():
+		nm = ("Bot %d" % (slot + 1)) if is_bot else "You"
 	return {
 		"id": id,
 		"x": x,
@@ -119,7 +139,7 @@ static func make_hole(id: int, x: float, y: float, is_bot: bool = false, slot: i
 		"score_changed_tick": 0,
 		"is_bot": is_bot,
 		"slot": slot,
-		"name": ("Bot %d" % (slot + 1)) if is_bot else "You",
+		"name": nm,
 	}
 
 
@@ -191,17 +211,36 @@ func setup_match(cfg: MatchConfig, world_seed: int = 42) -> void:
 	var kinds: PackedStringArray = cfg.slots
 	if kinds.is_empty():
 		kinds = MatchConfig.default_slots(clampi(cfg.hole_count, 1, 4))
+	var bot_names: PackedStringArray = _shuffled_bot_names()
+	var bot_name_i := 0
 	for slot_i in mini(4, kinds.size()):
 		var kind: String = str(kinds[slot_i])
 		if kind == MatchConfig.SLOT_EMPTY:
 			continue
 		var pad: Vector2 = SPAWN_PADS[slot_i]
 		var is_bot: bool = kind == MatchConfig.SLOT_BOT
-		holes.append(make_hole(_alloc_id(), pad.x, pad.y, is_bot, slot_i))
+		var nm := "You"
+		if is_bot:
+			nm = str(bot_names[bot_name_i % bot_names.size()])
+			bot_name_i += 1
+		holes.append(make_hole(_alloc_id(), pad.x, pad.y, is_bot, slot_i, nm))
 	if holes.is_empty():
 		# Safety: always at least the keyboard hole.
 		var pad0: Vector2 = SPAWN_PADS[0]
-		holes.append(make_hole(_alloc_id(), pad0.x, pad0.y, false, 0))
+		holes.append(make_hole(_alloc_id(), pad0.x, pad0.y, false, 0, "You"))
+
+
+func _shuffled_bot_names() -> PackedStringArray:
+	var names: Array = FUNNY_BOT_NAMES.duplicate()
+	for i in range(names.size() - 1, 0, -1):
+		var j: int = _rng.randi_range(0, i)
+		var tmp: Variant = names[i]
+		names[i] = names[j]
+		names[j] = tmp
+	var out := PackedStringArray()
+	for n in names:
+		out.append(str(n))
+	return out
 
 
 func _layout_phase2_map(world_seed: int) -> void:
@@ -401,10 +440,10 @@ func step(inputs_by_hole: Dictionary, dt: float) -> Array:
 
 func _steer_hole(hole: Dictionary, input: Vector2, dt: float) -> void:
 	var radius: float = float(hole["radius"])
-	# Bigger hole → slower top speed (start radius / your radius).
-	# At radius 1 you get full SPEED_BASE; at radius 2 you go half as fast.
-	# Never slower than SPEED_FLOOR (0.32×), so huge holes still crawl.
-	var speed: float = SPEED_BASE * clampf(START_RADIUS / radius, SPEED_FLOOR, 1.0)
+	# Bigger hole → slower, but softer than 1/r so large holes stay playable.
+	# Example: r=1 → full speed; r=2 → ~68% (was 50%); floor at SPEED_FLOOR.
+	var speed_scale: float = pow(START_RADIUS / maxf(radius, 0.01), SPEED_RADIUS_EXP)
+	var speed: float = SPEED_BASE * clampf(speed_scale, SPEED_FLOOR, 1.0)
 	var desired := Vector2.ZERO
 	var mag: float = input.length()
 	if mag > 0.0001:

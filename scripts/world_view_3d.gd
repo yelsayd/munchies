@@ -471,15 +471,24 @@ func _place_hole(root: Node3D, hole: Dictionary, _sim: MunchiesSim) -> void:
 	var slot: int = int(hole.get("slot", 0))
 	var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
 	var rim: MeshInstance3D = root.get_node("Rim") as MeshInstance3D
-	rim.material_override = _mat(ring)
-
 	var flash: MeshInstance3D = root.get_node("Flash") as MeshInstance3D
-	if host != null and host.swallow_flash > 0.0 and int(hole["id"]) == int(host.swallow_flash_hole):
-		var flash_a: float = clampf(host.swallow_flash / 0.18, 0.0, 1.0)
+	var growing: bool = (
+		host != null
+		and host.grow_flash > 0.0
+		and int(hole["id"]) == int(host.grow_flash_hole)
+	)
+	if growing:
+		var flash_a: float = clampf(host.grow_flash / 0.34, 0.0, 1.0)
+		# Brighten the claim rim while grown; white/gold bloom expands then settles.
+		rim.material_override = _mat(ring.lerp(Color(1.0, 0.98, 0.85), flash_a * 0.7))
 		flash.visible = true
-		flash.material_override = _mat(Color(1, 1, 1, flash_a * 0.85), true)
+		var pulse: float = 1.0 + 0.22 * flash_a
+		flash.scale = Vector3(pulse, 1.0, pulse)
+		flash.material_override = _mat(Color(1.0, 0.95, 0.65, flash_a * 0.9), true)
 	else:
+		rim.material_override = _mat(ring)
 		flash.visible = false
+		flash.scale = Vector3.ONE
 
 
 func _make_box(pos: Vector3, size: Vector3, col: Color) -> MeshInstance3D:

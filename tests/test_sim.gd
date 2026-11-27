@@ -120,6 +120,9 @@ func _check_slowdown() -> int:
 
 	hole["mass"] = 25.0
 	hole["radius"] = 5.0
+	# Reset to center so the faster big-hole crawl does not pin against the wall.
+	hole["x"] = 0.0
+	hole["y"] = 0.0
 	hole["vx"] = 0.0
 	hole["vy"] = 0.0
 	for i in 90:
@@ -346,6 +349,24 @@ func _check_setup_slots_optional_bots() -> int:
 	if not slots_seen.get(0, false) or not slots_seen.get(1, false) or not slots_seen.get(3, false):
 		print("FAIL expected holes on slots 0,1,3")
 		return 1
+	# Bots get unique funny names; human stays "You".
+	var seen_names := {}
+	for h in sim.holes:
+		var nm: String = str(h["name"])
+		if bool(h["is_bot"]):
+			if nm == "You" or nm.begins_with("Bot "):
+				print("FAIL bot should get a funny name, got ", nm)
+				return 1
+			if not MunchiesSim.FUNNY_BOT_NAMES.has(nm):
+				print("FAIL bot name not in FUNNY_BOT_NAMES: ", nm)
+				return 1
+			if seen_names.has(nm):
+				print("FAIL duplicate bot name: ", nm)
+				return 1
+			seen_names[nm] = true
+		elif nm != "You":
+			print("FAIL human hole name should be You, got ", nm)
+			return 1
 	# Solo keyboard still valid (unlimited sandbox).
 	var solo := MatchConfig.for_mode(MatchConfig.Mode.UNLIMITED, 1)
 	if solo.active_hole_count() != 1 or solo.has_end_card():

@@ -121,9 +121,21 @@ func _draw() -> void:
 			ring
 		)
 
-		if host.swallow_flash > 0.0 and int(hole["id"]) == int(host.swallow_flash_hole):
-			var flash_a: float = clampf(host.swallow_flash / 0.18, 0.0, 1.0)
-			draw_arc(hpos, hr + 4.0, 0.0, TAU, 64, Color(1, 1, 1, flash_a), 3.5, true)
+		if host.grow_flash > 0.0 and int(hole["id"]) == int(host.grow_flash_hole):
+			var flash_a: float = clampf(host.grow_flash / 0.34, 0.0, 1.0)
+			# Expanding grow pulse — bright rim + outer ring that blooms outward.
+			var bloom: float = 1.0 - flash_a
+			draw_arc(
+				hpos,
+				hr + 2.0 + bloom * 10.0,
+				0.0,
+				TAU,
+				64,
+				Color(1.0, 0.95, 0.7, flash_a * 0.9),
+				3.0 + flash_a * 2.0,
+				true
+			)
+			draw_arc(hpos, hr + 1.0, 0.0, TAU, 64, Color(1, 1, 1, flash_a), 4.5, true)
 
 
 func _draw_ground(half: float) -> void:
