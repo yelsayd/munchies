@@ -6,7 +6,7 @@
 [ext_resource type="Script" path="res://scripts/world_view_3d.gd" id="4_world3d"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hudpanel"]
-bg_color = Color(0.035, 0.04, 0.048, 0.92)
+bg_color = Color(0.035, 0.04, 0.048, 0.72)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1

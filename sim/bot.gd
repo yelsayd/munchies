@@ -20,23 +20,27 @@ static func input_for(sim: MunchiesSim, hole_id: int) -> Vector2:
 	var hr: float = float(hole["radius"])
 	var pos := Vector2(hx, hy)
 
-	# Flee larger holes that can eat us.
+	# Flee larger holes that can eat us; hunt smaller ones we can swallow.
 	var flee := Vector2.ZERO
+	var hunt := Vector2.ZERO
+	var hunt_dist: float = INF
 	if sim.config != null and sim.config.allow_player_eat:
 		for other_v in sim.holes:
 			var other: Dictionary = other_v
 			if int(other["id"]) == hole_id or not bool(other["alive"]):
 				continue
 			var orad: float = float(other["radius"])
-			if hr > orad * MunchiesSim.PLAYER_EAT_RATIO:
-				continue ## we are not the smaller one
-			if orad * MunchiesSim.PLAYER_EAT_RATIO < hr:
-				continue ## they cannot eat us
 			var op := Vector2(float(other["x"]), float(other["y"]))
 			var d: float = pos.distance_to(op)
-			var danger: float = orad * MunchiesSim.PLAYER_SUCTION_MULT * FEAR_MULT
-			if d < danger and d > 0.001:
-				flee += (pos - op).normalized() * ((danger - d) / danger)
+			# They can eat us → flee.
+			if orad * MunchiesSim.PLAYER_EAT_RATIO >= hr:
+				var danger: float = orad * MunchiesSim.PLAYER_SUCTION_MULT * FEAR_MULT
+				if d < danger and d > 0.001:
+					flee += (pos - op).normalized() * ((danger - d) / danger)
+			# We can eat them → chase the nearest meal.
+			elif orad <= hr * MunchiesSim.PLAYER_EAT_RATIO and d < hunt_dist:
+				hunt_dist = d
+				hunt = op - pos
 
 	# Seek nearest food this hole can actually cover (skips fallen buildings that are too big).
 	var best_food := Vector2.ZERO
@@ -57,9 +61,13 @@ static func input_for(sim: MunchiesSim, hole_id: int) -> Vector2:
 			best_dist = d
 			best_food = pp - pos
 
+	# Prefer hunting a smaller hole when it's in engagement range; else food.
+	var hunt_range: float = hr * MunchiesSim.PLAYER_SUCTION_MULT * 5.0
 	var steer := Vector2.ZERO
 	if flee.length_squared() > 0.01:
 		steer = flee
+	elif hunt_dist < hunt_range:
+		steer = hunt
 	elif best_dist < INF:
 		steer = best_food
 	else:

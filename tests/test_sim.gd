@@ -30,6 +30,7 @@ func _init() -> void:
 	failed += _check_unlimited_no_clock_fields_used()
 	failed += _check_hole_respawn()
 	failed += _check_bot_emits_input()
+	failed += _check_bot_hunts_smaller_hole()
 	failed += _check_player_swallow()
 	failed += _check_cover_to_swallow()
 	failed += _check_building_tip_and_fall()
@@ -604,6 +605,32 @@ func _check_bot_emits_input() -> int:
 		print("FAIL bot wrote positions")
 		return 1
 	print("ok bot emits Input")
+	return 0
+
+
+func _check_bot_hunts_smaller_hole() -> int:
+	## Bigger bot should steer toward a smaller rival, not only toward props.
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 2)
+	var sim := MunchiesSim.new()
+	sim.setup_empty(1, 40.0)
+	sim.config = cfg
+	sim.holes.clear()
+	sim.objects.clear()
+	sim.holes.append(MunchiesSim.make_hole(1, 0.0, 0.0, true, 0))
+	sim.holes.append(MunchiesSim.make_hole(2, 6.0, 0.0, true, 1))
+	var big: Dictionary = sim.holes[0]
+	var small: Dictionary = sim.holes[1]
+	big["mass"] = 4.0
+	big["radius"] = 2.0
+	small["mass"] = 1.0
+	small["radius"] = 1.0
+	# Distant food so hunt wins over snack seeking.
+	sim.objects.append(MunchiesSim.make_prop(888, -40.0, -40.0, 0, MunchiesSim.TIER0_RADIUS))
+	var inp: Vector2 = MunchiesBot.input_for(sim, 1)
+	if inp.x < 0.5:
+		print("FAIL big bot should hunt smaller hole to the right, got ", inp)
+		return 1
+	print("ok bot hunts smaller hole")
 	return 0
 
 

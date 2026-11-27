@@ -526,7 +526,8 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	nametag.outline_size = 10
 	nametag.outline_modulate = Color(0.02, 0.02, 0.03, 0.85)
 	nametag.modulate = ring_col
-	nametag.position = Vector3(0.0, 0.28, 1.2)
+	# Just outside the rim; _place_hole keeps a fixed world gap past the edge.
+	nametag.position = Vector3(0.0, 0.2, 1.55)
 	root.add_child(nametag)
 
 	return root
@@ -570,10 +571,10 @@ func _place_hole(root: Node3D, hole: Dictionary, _sim: MunchiesSim) -> void:
 	if nametag != null:
 		nametag.text = str(hole.get("name", ""))
 		nametag.modulate = ring
-		# Keep glyph size + “just outside rim” placement stable as the hole grows.
+		# Counter-scale glyphs; keep ~0.7 m past the rim so text clears the ring.
 		var inv: float = 1.0 / maxf(r, 0.01)
 		nametag.scale = Vector3(inv, 1.0, inv)
-		nametag.position = Vector3(0.0, 0.28, 1.15)
+		nametag.position = Vector3(0.0, 0.18, 1.0 + 0.7 * inv)
 
 	var growing: bool = (
 		host != null

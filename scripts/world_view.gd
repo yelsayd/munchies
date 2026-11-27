@@ -118,7 +118,7 @@ func _draw() -> void:
 			var tw: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			draw_string(
 				font,
-				hpos + Vector2(-tw * 0.5, hr + 16.0),
+				hpos + Vector2(-tw * 0.5, hr + 24.0),
 				label,
 				HORIZONTAL_ALIGNMENT_LEFT,
 				-1,

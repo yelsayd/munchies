@@ -741,7 +741,7 @@ func _make_pane_overlay(frame: Control, _hole: Dictionary, _slot_fallback: int) 
 	var chip := PanelContainer.new()
 	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.035, 0.04, 0.048, 0.92)
+	sb.bg_color = Color(0.035, 0.04, 0.048, 0.72)
 	sb.set_border_width_all(1)
 	sb.border_color = Color(0.2, 0.24, 0.22, 0.7)
 	sb.set_corner_radius_all(8)
