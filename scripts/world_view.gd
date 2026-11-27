@@ -63,11 +63,13 @@ func _draw() -> void:
 		var r: float = float(prop["radius"]) * PIXELS_PER_METER
 		var tier: int = int(prop["tier"])
 		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
+		if tier == 2 and prop.has("body_color"):
+			col = prop["body_color"] as Color
 		var facing: float = _prop_facing(prop, sim)
 		if bool(prop.get("fallen", false)) or float(prop.get("tip_angle", 0.0)) > 0.05:
 			_draw_prop_tipped(prop, pos, r, col, tier)
 		else:
-			_draw_tier_shape(tier, pos, r, col, int(prop["id"]), facing)
+			_draw_tier_shape(tier, pos, r, col, int(prop["id"]), facing, int(prop.get("vehicle", 0)))
 		# Contested / claimed: only the claiming hole owns the prop — ring in that hole's color.
 		var claimed: int = int(prop.get("claimed_by", -1))
 		if claimed != -1:
@@ -277,7 +279,11 @@ func _draw_spawn_pads() -> void:
 
 
 func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
-	## Prefer road orientation for cars; otherwise a stable angle from id.
+	## Prefer drive velocity so moving cars face travel direction.
+	var vx: float = float(prop.get("vx", 0.0))
+	var vy: float = float(prop.get("vy", 0.0))
+	if vx * vx + vy * vy > 0.25:
+		return atan2(vy, vx)
 	var px: float = float(prop["x"])
 	var py: float = float(prop["y"])
 	var best_d: float = INF
@@ -296,14 +302,22 @@ func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
 	return facing
 
 
-func _draw_tier_shape(tier: int, pos: Vector2, r: float, col: Color, prop_id: int, facing: float) -> void:
+func _draw_tier_shape(
+	tier: int,
+	pos: Vector2,
+	r: float,
+	col: Color,
+	prop_id: int,
+	facing: float,
+	vehicle: int = 0
+) -> void:
 	match tier:
 		0:
 			_draw_litter(pos, r, col, prop_id)
 		1:
 			_draw_street_prop(pos, r, col, prop_id)
 		2:
-			_draw_car(pos, r, col, facing)
+			_draw_car(pos, r, col, facing, vehicle)
 		3:
 			_draw_building(pos, r, col, false)
 		_:
@@ -362,13 +376,25 @@ func _draw_street_prop(pos: Vector2, r: float, col: Color, prop_id: int) -> void
 			draw_circle(pos + Vector2(0, -r * 0.95), r * 0.4, col.lightened(0.15))
 
 
-func _draw_car(pos: Vector2, r: float, col: Color, facing: float) -> void:
-	## Top-down car: tapered body, glass cabin, wheels. Facing aligns to nearest road.
+func _draw_car(pos: Vector2, r: float, col: Color, facing: float, vehicle: int = 0) -> void:
+	## Top-down sedan / van / truck. Facing follows road travel.
 	if r < 2.0 or not is_finite(facing):
 		draw_circle(pos, maxf(r, 1.0), col)
 		return
 	var body_len := r * 2.55
 	var body_w := r * 1.2
+	var cabin_len := r * 1.05
+	var cabin_off := r * 0.12
+	if vehicle == MunchiesSim.VEHICLE_VAN:
+		body_len = r * 2.7
+		body_w = r * 1.3
+		cabin_len = r * 1.9
+		cabin_off = -r * 0.1
+	elif vehicle == MunchiesSim.VEHICLE_TRUCK:
+		body_len = r * 3.2
+		body_w = r * 1.35
+		cabin_len = r * 0.9
+		cabin_off = r * 0.85
 	var axis := Vector2(cos(facing), sin(facing))
 	if axis.length_squared() < 0.0001:
 		axis = Vector2.RIGHT
@@ -378,22 +404,24 @@ func _draw_car(pos: Vector2, r: float, col: Color, facing: float) -> void:
 		_oriented_rect(pos + Vector2(r * 0.06, r * 0.06), body_len * 1.02, body_w * 1.08, axis, perp),
 		Color(0, 0, 0, 0.25 * col.a)
 	)
-	# Body (slightly rounded via end caps)
 	_draw_poly_safe(_oriented_rect(pos, body_len, body_w, axis, perp), col)
 	draw_circle(pos + axis * (body_len * 0.42), body_w * 0.48, col)
 	draw_circle(pos - axis * (body_len * 0.42), body_w * 0.42, col)
-	# Cabin glass
-	var cabin_c := pos + axis * (r * 0.12)
+	var cabin_c := pos + axis * cabin_off
 	_draw_poly_safe(
-		_oriented_rect(cabin_c, r * 1.05, body_w * 0.72, axis, perp),
+		_oriented_rect(cabin_c, cabin_len, body_w * 0.72, axis, perp),
 		Color(0.62, 0.78, 0.90, col.a)
 	)
-	# Nose stripe so facing reads
+	if vehicle == MunchiesSim.VEHICLE_TRUCK:
+		# Cargo box behind the cab
+		_draw_poly_safe(
+			_oriented_rect(pos - axis * (r * 0.45), r * 1.9, body_w * 0.95, axis, perp),
+			col.darkened(0.18)
+		)
 	_draw_poly_safe(
 		_oriented_rect(pos + axis * (body_len * 0.38), r * 0.35, body_w * 0.55, axis, perp),
 		col.lightened(0.18)
 	)
-	# Wheels
 	var wheel_col := Color(0.08, 0.08, 0.10, col.a)
 	var wheel_r := r * 0.3
 	var long_off := body_len * 0.3

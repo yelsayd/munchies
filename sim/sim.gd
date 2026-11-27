@@ -71,6 +71,23 @@ const TIER2_RADIUS := 1.30
 const TIER3_RADIUS := 3.20
 const TIER4_RADIUS := 6.50
 
+## Tier-2 road vehicles.
+const VEHICLE_SEDAN := 0
+const VEHICLE_VAN := 1
+const VEHICLE_TRUCK := 2
+const VEHICLE_SPEED_MIN := 5.0
+const VEHICLE_SPEED_MAX := 9.5
+const VEHICLE_COLORS := [
+	Color(0.32, 0.52, 0.88), ## blue
+	Color(0.86, 0.24, 0.22), ## red
+	Color(0.93, 0.93, 0.90), ## white
+	Color(0.14, 0.14, 0.15), ## black
+	Color(0.94, 0.78, 0.22), ## yellow
+	Color(0.28, 0.55, 0.36), ## green
+	Color(0.58, 0.58, 0.62), ## silver
+	Color(0.92, 0.48, 0.18), ## orange
+]
+
 ## Full map is 160 × 160 m → half-extent 80.
 const MAP_HALF_DEFAULT := 80.0
 
@@ -159,6 +176,10 @@ static func make_prop(id: int, x: float, y: float, tier: int, radius: float) -> 
 		"fallen": false,
 		"tip_dx": 1.0,
 		"tip_dy": 0.0,
+		## Tier-2 vehicle fields (ignored for other tiers).
+		"vehicle": VEHICLE_SEDAN,
+		"body_color": VEHICLE_COLORS[0],
+		"road_i": -1,
 	}
 
 
@@ -395,12 +416,54 @@ func _place_on_roads(tier: int, radius: float, count: int) -> void:
 		_scatter_props(tier, radius, count, Vector2.ZERO, 50.0, 10.0)
 		return
 	for i in count:
-		var road: Rect2 = roads[i % roads.size()]
+		var road_i: int = i % roads.size()
+		var road: Rect2 = roads[road_i]
+		if tier == 2:
+			objects.append(_make_vehicle_on_road(road_i, road))
+			continue
 		var x: float = _rng.randf_range(road.position.x + radius, road.position.x + road.size.x - radius)
 		var y: float = _rng.randf_range(road.position.y + radius, road.position.y + road.size.y - radius)
 		x = clampf(x, -map_half + radius, map_half - radius)
 		y = clampf(y, -map_half + radius, map_half - radius)
 		objects.append(make_prop(_alloc_id(), x, y, tier, radius))
+
+
+func _make_vehicle_on_road(road_i: int, road: Rect2) -> Dictionary:
+	var kind: int = _rng.randi_range(0, 2)
+	var r: float = TIER2_RADIUS
+	if kind == VEHICLE_VAN:
+		r *= 1.18
+	elif kind == VEHICLE_TRUCK:
+		r *= 1.38
+	var horizontal: bool = road.size.x >= road.size.y
+	var margin: float = r * 1.3
+	var x: float
+	var y: float
+	if horizontal:
+		x = _rng.randf_range(road.position.x + margin, road.position.x + road.size.x - margin)
+		y = road.position.y + road.size.y * 0.5
+	else:
+		x = road.position.x + road.size.x * 0.5
+		y = _rng.randf_range(road.position.y + margin, road.position.y + road.size.y - margin)
+	x = clampf(x, -map_half + r, map_half - r)
+	y = clampf(y, -map_half + r, map_half - r)
+	var prop: Dictionary = make_prop(_alloc_id(), x, y, 2, r)
+	_configure_vehicle(prop, kind, road_i, horizontal)
+	return prop
+
+
+func _configure_vehicle(prop: Dictionary, kind: int, road_i: int, horizontal: bool) -> void:
+	prop["vehicle"] = kind
+	prop["body_color"] = VEHICLE_COLORS[_rng.randi_range(0, VEHICLE_COLORS.size() - 1)]
+	prop["road_i"] = road_i
+	var speed: float = _rng.randf_range(VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX)
+	var sign: float = -1.0 if _rng.randf() < 0.5 else 1.0
+	if horizontal:
+		prop["vx"] = speed * sign
+		prop["vy"] = 0.0
+	else:
+		prop["vx"] = 0.0
+		prop["vy"] = speed * sign
 
 
 func _place_edge_landmarks(tier: int, radius: float, positions: Array) -> void:
@@ -561,7 +624,12 @@ static func prop_tip_dims(prop: Dictionary) -> Vector2:
 		1:
 			return Vector2(r * 1.4, r * 1.6)
 		2:
-			return Vector2(r * 2.5, r * 0.95) ## car length × body+cabin height
+			var kind: int = int(prop.get("vehicle", VEHICLE_SEDAN))
+			if kind == VEHICLE_TRUCK:
+				return Vector2(r * 3.1, r * 1.15)
+			if kind == VEHICLE_VAN:
+				return Vector2(r * 2.6, r * 1.2)
+			return Vector2(r * 2.5, r * 0.95) ## sedan length × height
 		3:
 			return Vector2(r * BUILDING_WIDTH_MULT, r * BUILDING_HEIGHT_MULT)
 		_:
@@ -662,10 +730,19 @@ func _update_props(dt: float, events: Array) -> void:
 		var px: float = float(prop["x"])
 		var py: float = float(prop["y"])
 		var pr: float = float(prop["radius"])
-		# Static world props — no suction velocity.
-		prop["vx"] = 0.0
-		prop["vy"] = 0.0
 		_update_prop_tip(prop, alive, dt)
+		# Cars/vans/trucks cruise roads until they tip or fall; everything else stays put.
+		if (
+			int(prop["tier"]) == 2
+			and not bool(prop.get("fallen", false))
+			and float(prop.get("tip_angle", 0.0)) < 0.05
+		):
+			_drive_vehicle(prop, dt)
+			px = float(prop["x"])
+			py = float(prop["y"])
+		else:
+			prop["vx"] = 0.0
+			prop["vy"] = 0.0
 
 		# Closest qualifying hole claims (ring UI); others ignore a claimed prop.
 		var best_hole: Dictionary = {}
@@ -743,6 +820,68 @@ func _update_props(dt: float, events: Array) -> void:
 
 	for dead in to_remove:
 		objects.erase(dead)
+
+
+func _drive_vehicle(prop: Dictionary, dt: float) -> void:
+	## Keep tier-2 vehicles on their road centerline; bounce at the ends.
+	var road_i: int = int(prop.get("road_i", -1))
+	if road_i < 0 or road_i >= roads.size():
+		road_i = _find_road_index(float(prop["x"]), float(prop["y"]))
+		prop["road_i"] = road_i
+	if road_i < 0 or road_i >= roads.size():
+		prop["vx"] = 0.0
+		prop["vy"] = 0.0
+		return
+	var road: Rect2 = roads[road_i]
+	var r: float = float(prop["radius"])
+	var horizontal: bool = road.size.x >= road.size.y
+	var speed: float = maxf(absf(float(prop["vx"])), absf(float(prop["vy"])))
+	if speed < 0.5:
+		speed = lerpf(VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX, 0.5)
+	var x: float = float(prop["x"]) + float(prop["vx"]) * dt
+	var y: float = float(prop["y"]) + float(prop["vy"]) * dt
+	if horizontal:
+		y = road.position.y + road.size.y * 0.5
+		var min_x: float = road.position.x + r
+		var max_x: float = road.position.x + road.size.x - r
+		if x <= min_x:
+			x = min_x
+			prop["vx"] = speed
+		elif x >= max_x:
+			x = max_x
+			prop["vx"] = -speed
+		prop["vy"] = 0.0
+	else:
+		x = road.position.x + road.size.x * 0.5
+		var min_y: float = road.position.y + r
+		var max_y: float = road.position.y + road.size.y - r
+		if y <= min_y:
+			y = min_y
+			prop["vy"] = speed
+		elif y >= max_y:
+			y = max_y
+			prop["vy"] = -speed
+		prop["vx"] = 0.0
+	prop["x"] = clampf(x, -map_half + r, map_half - r)
+	prop["y"] = clampf(y, -map_half + r, map_half - r)
+
+
+func _find_road_index(x: float, y: float) -> int:
+	var best_i := -1
+	var best_d: float = INF
+	var p := Vector2(x, y)
+	for i in roads.size():
+		var road: Rect2 = roads[i]
+		var expanded := road.grow(2.0)
+		if not expanded.has_point(p):
+			continue
+		var cx: float = clampf(x, road.position.x, road.position.x + road.size.x)
+		var cy: float = clampf(y, road.position.y, road.position.y + road.size.y)
+		var d: float = p.distance_to(Vector2(cx, cy))
+		if d < best_d:
+			best_d = d
+			best_i = i
+	return best_i
 
 
 func _update_player_swallow(dt: float, events: Array) -> void:
@@ -880,6 +1019,10 @@ func _process_prop_respawns() -> void:
 			continue
 		var tier: int = int(item["tier"])
 		var radius: float = float(TIER_RADIUS[clampi(tier, 0, TIER_RADIUS.size() - 1)])
+		if tier == 2 and not roads.is_empty():
+			var road_i: int = _rng.randi_range(0, roads.size() - 1)
+			objects.append(_make_vehicle_on_road(road_i, roads[road_i]))
+			continue
 		var pos := _spawn_prop_away_from_holes(Vector2(float(item["x"]), float(item["y"])), radius)
 		objects.append(make_prop(_alloc_id(), pos.x, pos.y, tier, radius))
 	_pending_prop_spawns = keep

@@ -31,6 +31,7 @@ func _init() -> void:
 	failed += _check_hole_respawn()
 	failed += _check_bot_emits_input()
 	failed += _check_bot_hunts_smaller_hole()
+	failed += _check_vehicles_drive()
 	failed += _check_player_swallow()
 	failed += _check_cover_to_swallow()
 	failed += _check_building_tip_and_fall()
@@ -631,6 +632,32 @@ func _check_bot_hunts_smaller_hole() -> int:
 		print("FAIL big bot should hunt smaller hole to the right, got ", inp)
 		return 1
 	print("ok bot hunts smaller hole")
+	return 0
+
+
+func _check_vehicles_drive() -> int:
+	var sim := MunchiesSim.new()
+	sim.setup_phase2(42, 0)
+	var car: Dictionary = {}
+	for p in sim.objects:
+		if int(p["tier"]) == 2:
+			car = p
+			break
+	if car.is_empty():
+		print("FAIL expected a road vehicle")
+		return 1
+	if not car.has("vehicle") or not car.has("body_color"):
+		print("FAIL vehicle missing kind/color")
+		return 1
+	var before := Vector2(float(car["x"]), float(car["y"]))
+	for i in 45:
+		sim.step({int(sim.player_hole()["id"]): Vector2.ZERO}, 1.0 / 60.0)
+	var after := Vector2(float(car["x"]), float(car["y"]))
+	var speed: float = absf(float(car["vx"])) + absf(float(car["vy"]))
+	if before.distance_to(after) < 0.5 and speed < 1.0:
+		print("FAIL vehicle should drive along roads: moved=", before.distance_to(after), " speed=", speed)
+		return 1
+	print("ok vehicles drive")
 	return 0
 
 

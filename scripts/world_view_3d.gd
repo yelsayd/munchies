@@ -247,13 +247,15 @@ func _sync_props(sim: MunchiesSim) -> void:
 			continue
 		seen[id] = true
 		var node: Node3D = _prop_nodes.get(id) as Node3D
-		# Rebuild legacy single-mesh props into composites.
-		if node != null and not bool(node.get_meta("composite", false)):
+		var want_key: String = _prop_mesh_key(prop)
+		# Rebuild when shape/color kind changes (or legacy single-mesh).
+		if node != null and str(node.get_meta("mesh_key", "")) != want_key:
 			node.queue_free()
 			_prop_nodes.erase(id)
 			node = null
 		if node == null:
 			node = _make_prop_node(prop)
+			node.set_meta("mesh_key", want_key)
 			_props_root.add_child(node)
 			_prop_nodes[id] = node
 		_place_prop(node, prop, sim)
@@ -345,9 +347,17 @@ func _sync_tweens() -> void:
 		var face_yaw := 0.0
 		if tier == 2 and host != null and host.sim != null:
 			face_yaw = -_prop_facing(fake, host.sim as MunchiesSim)
-		_place_prop_tipped(node, fake, _prop_height(tier, r * scale_v), face_yaw)
+		_place_prop_tipped(node, fake, _prop_height(tier, r * scale_v, fake), face_yaw)
 		node.position.y -= drop
 		_tween_nodes.append(node)
+
+
+func _prop_mesh_key(prop: Dictionary) -> String:
+	var tier: int = int(prop["tier"])
+	if tier == 2:
+		var bc: Color = prop.get("body_color", TIER_COLORS[2]) as Color
+		return "2:%d:%s" % [int(prop.get("vehicle", 0)), bc]
+	return "%d:%d" % [tier, int(prop.get("id", 0)) % 3]
 
 
 func _make_prop_node(prop: Dictionary) -> Node3D:
@@ -364,11 +374,12 @@ func _make_prop_node(prop: Dictionary) -> Node3D:
 		1:
 			_build_street_prop(root, r, col, prop_id)
 		2:
-			_build_car(root, r, col)
+			var body: Color = prop.get("body_color", col) as Color
+			_build_car(root, r, body, int(prop.get("vehicle", 0)))
 		3:
-			_build_building(root, r, col, false)
+			_build_building(root, r, col, false, prop_id)
 		_:
-			_build_building(root, r, col, true)
+			_build_building(root, r, col, true, prop_id)
 	return root
 
 
@@ -432,52 +443,109 @@ func _build_street_prop(root: Node3D, r: float, col: Color, prop_id: int) -> voi
 			_add_prop_part(root, _make_box(Vector3(-r * 0.55, r * 0.15, 0.0), Vector3(r * 0.45, r * 0.28, r * 0.28), col), col)
 
 
-func _build_car(root: Node3D, r: float, col: Color) -> void:
-	## Body + cabin glass + four wheels. Length along local X (yaw faces the road).
+func _build_car(root: Node3D, r: float, col: Color, kind: int = 0) -> void:
+	## Sedan / van / truck. Length along local X (yaw follows drive direction).
 	var body_col: Color = col
-	var cabin_col := Color(0.45, 0.62, 0.78).lerp(col, 0.25)
+	var cabin_col := Color(0.45, 0.62, 0.78).lerp(col, 0.2)
 	var wheel_col := Color(0.12, 0.12, 0.14)
 	var trim := col.darkened(0.2)
-	# Lower body
-	_add_prop_part(root, _make_box(Vector3(0.0, -r * 0.12, 0.0), Vector3(r * 2.5, r * 0.55, r * 1.15), body_col), body_col)
-	# Cabin / glass
-	_add_prop_part(root, _make_box(Vector3(-r * 0.05, r * 0.32, 0.0), Vector3(r * 1.15, r * 0.42, r * 0.95), cabin_col), cabin_col)
-	# Hood / trunk dark strips
-	_add_prop_part(root, _make_box(Vector3(r * 0.85, r * 0.05, 0.0), Vector3(r * 0.55, r * 0.12, r * 1.0), trim), trim)
-	_add_prop_part(root, _make_box(Vector3(-r * 0.95, r * 0.02, 0.0), Vector3(r * 0.4, r * 0.1, r * 1.0), trim), trim)
-	# Wheels (axle along Z)
-	for xz in [
-		Vector3(r * 0.75, -r * 0.32, r * 0.52),
-		Vector3(r * 0.75, -r * 0.32, -r * 0.52),
-		Vector3(-r * 0.75, -r * 0.32, r * 0.52),
-		Vector3(-r * 0.75, -r * 0.32, -r * 0.52),
-	]:
-		var wheel := _make_cylinder(xz, r * 0.28, r * 0.22, wheel_col)
-		wheel.rotation.x = PI * 0.5
-		_add_prop_part(root, wheel, wheel_col)
+	match kind:
+		MunchiesSim.VEHICLE_TRUCK:
+			# Cab + boxy cargo
+			_add_prop_part(root, _make_box(Vector3(r * 0.85, -r * 0.05, 0.0), Vector3(r * 1.2, r * 0.7, r * 1.2), body_col), body_col)
+			_add_prop_part(root, _make_box(Vector3(r * 0.85, r * 0.45, 0.0), Vector3(r * 0.95, r * 0.55, r * 1.05), cabin_col), cabin_col)
+			_add_prop_part(root, _make_box(Vector3(-r * 0.55, r * 0.15, 0.0), Vector3(r * 2.0, r * 1.1, r * 1.25), trim), trim)
+			_add_prop_part(root, _make_box(Vector3(r * 1.35, r * 0.05, 0.0), Vector3(r * 0.35, r * 0.2, r * 0.9), body_col.lightened(0.15)), body_col.lightened(0.15))
+			for xz in [
+				Vector3(r * 1.1, -r * 0.38, r * 0.55),
+				Vector3(r * 1.1, -r * 0.38, -r * 0.55),
+				Vector3(-r * 0.2, -r * 0.38, r * 0.55),
+				Vector3(-r * 0.2, -r * 0.38, -r * 0.55),
+				Vector3(-r * 1.2, -r * 0.38, r * 0.55),
+				Vector3(-r * 1.2, -r * 0.38, -r * 0.55),
+			]:
+				var wheel := _make_cylinder(xz, r * 0.3, r * 0.24, wheel_col)
+				wheel.rotation.x = PI * 0.5
+				_add_prop_part(root, wheel, wheel_col)
+		MunchiesSim.VEHICLE_VAN:
+			# Tall cabin covering most of the body
+			_add_prop_part(root, _make_box(Vector3(0.0, -r * 0.05, 0.0), Vector3(r * 2.6, r * 0.65, r * 1.2), body_col), body_col)
+			_add_prop_part(root, _make_box(Vector3(-r * 0.15, r * 0.45, 0.0), Vector3(r * 2.1, r * 0.7, r * 1.05), cabin_col), cabin_col)
+			_add_prop_part(root, _make_box(Vector3(r * 1.0, r * 0.15, 0.0), Vector3(r * 0.45, r * 0.2, r * 1.0), trim), trim)
+			for xz in [
+				Vector3(r * 0.85, -r * 0.35, r * 0.55),
+				Vector3(r * 0.85, -r * 0.35, -r * 0.55),
+				Vector3(-r * 0.85, -r * 0.35, r * 0.55),
+				Vector3(-r * 0.85, -r * 0.35, -r * 0.55),
+			]:
+				var wheel := _make_cylinder(xz, r * 0.28, r * 0.22, wheel_col)
+				wheel.rotation.x = PI * 0.5
+				_add_prop_part(root, wheel, wheel_col)
+		_:
+			# Sedan
+			_add_prop_part(root, _make_box(Vector3(0.0, -r * 0.12, 0.0), Vector3(r * 2.5, r * 0.55, r * 1.15), body_col), body_col)
+			_add_prop_part(root, _make_box(Vector3(-r * 0.05, r * 0.32, 0.0), Vector3(r * 1.15, r * 0.42, r * 0.95), cabin_col), cabin_col)
+			_add_prop_part(root, _make_box(Vector3(r * 0.85, r * 0.05, 0.0), Vector3(r * 0.55, r * 0.12, r * 1.0), trim), trim)
+			_add_prop_part(root, _make_box(Vector3(-r * 0.95, r * 0.02, 0.0), Vector3(r * 0.4, r * 0.1, r * 1.0), trim), trim)
+			for xz in [
+				Vector3(r * 0.75, -r * 0.32, r * 0.52),
+				Vector3(r * 0.75, -r * 0.32, -r * 0.52),
+				Vector3(-r * 0.75, -r * 0.32, r * 0.52),
+				Vector3(-r * 0.75, -r * 0.32, -r * 0.52),
+			]:
+				var wheel := _make_cylinder(xz, r * 0.28, r * 0.22, wheel_col)
+				wheel.rotation.x = PI * 0.5
+				_add_prop_part(root, wheel, wheel_col)
 
 
-func _build_building(root: Node3D, r: float, col: Color, is_block: bool) -> void:
+func _build_building(root: Node3D, r: float, col: Color, is_block: bool, prop_id: int = 0) -> void:
 	var w: float = r * (1.8 if is_block else 1.6)
 	var h: float = r * (2.8 if is_block else 2.2)
 	_add_prop_part(root, _make_box(Vector3.ZERO, Vector3(w, h, w), col), col)
 	# Roof cap
 	var roof := col.darkened(0.18)
 	_add_prop_part(root, _make_box(Vector3(0.0, h * 0.48, 0.0), Vector3(w * 1.05, h * 0.08, w * 1.05), roof), roof)
-	# Window band
-	var glass := Color(0.35, 0.45, 0.55).lerp(col, 0.2)
-	_add_prop_part(root, _make_box(Vector3(0.0, h * 0.1, w * 0.51), Vector3(w * 0.7, h * 0.35, w * 0.04), glass), glass)
-	_add_prop_part(root, _make_box(Vector3(w * 0.51, h * 0.1, 0.0), Vector3(w * 0.04, h * 0.35, w * 0.7), glass), glass)
+	# Window grid on two faces (skip a few buildings for variety).
+	if abs(prop_id) % 5 == 0:
+		return
+	var glass := Color(0.42, 0.58, 0.72).lerp(col, 0.15)
+	var lit := Color(0.85, 0.78, 0.45).lerp(glass, 0.35)
+	var cols_n: int = 3 if is_block else 2
+	var rows_n: int = 4 if is_block else 3
+	var pane_w: float = w * 0.16
+	var pane_h: float = h * 0.12
+	var x0: float = -w * 0.28
+	var y0: float = -h * 0.28
+	for row in rows_n:
+		for col_i in cols_n:
+			var px: float = x0 + float(col_i) * (w * 0.28)
+			var py: float = y0 + float(row) * (h * 0.2)
+			var pane_col: Color = lit if ((prop_id + row * 3 + col_i) % 4 == 0) else glass
+			_add_prop_part(
+				root,
+				_make_box(Vector3(px, py, w * 0.51), Vector3(pane_w, pane_h, w * 0.03), pane_col),
+				pane_col
+			)
+			_add_prop_part(
+				root,
+				_make_box(Vector3(w * 0.51, py, px), Vector3(w * 0.03, pane_h, pane_w), pane_col),
+				pane_col
+			)
 
 
-func _prop_height(tier: int, r: float) -> float:
+func _prop_height(tier: int, r: float, prop: Dictionary = {}) -> float:
 	match tier:
 		0:
 			return r * 0.7
 		1:
 			return r * 1.6
 		2:
-			return r * 0.95 ## body + cabin
+			var kind: int = int(prop.get("vehicle", 0))
+			if kind == MunchiesSim.VEHICLE_TRUCK:
+				return r * 1.15
+			if kind == MunchiesSim.VEHICLE_VAN:
+				return r * 1.2
+			return r * 0.95
 		3:
 			return r * 2.2
 		_:
@@ -485,6 +553,11 @@ func _prop_height(tier: int, r: float) -> float:
 
 
 func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
+	## Prefer drive velocity so moving cars face the way they travel.
+	var vx: float = float(prop.get("vx", 0.0))
+	var vy: float = float(prop.get("vy", 0.0))
+	if vx * vx + vy * vy > 0.25:
+		return atan2(vy, vx)
 	var px: float = float(prop["x"])
 	var py: float = float(prop["y"])
 	var best_d: float = INF
@@ -506,7 +579,7 @@ func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
 func _place_prop(node: Node3D, prop: Dictionary, sim: MunchiesSim) -> void:
 	var r: float = float(prop["radius"])
 	var tier: int = int(prop["tier"])
-	var h: float = _prop_height(tier, r)
+	var h: float = _prop_height(tier, r, prop)
 	var face_yaw: float = -_prop_facing(prop, sim) if tier == 2 else 0.0
 	var tip_angle: float = float(prop.get("tip_angle", 0.0))
 	if bool(prop.get("fallen", false)) or tip_angle > 0.01:

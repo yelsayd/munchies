@@ -44,6 +44,7 @@ enum PauseChoice { RESUME, RESTART, EXIT }
 @onready var slot_list: ItemList = $HUD/Setup/Margin/VBox/SlotList
 @onready var setup_summary: Label = $HUD/Setup/Margin/VBox/SlotSummary
 @onready var setup_hint: Label = $HUD/Setup/Margin/VBox/SetupHint
+@onready var end_dim: ColorRect = $HUD/EndDim
 @onready var end_panel: PanelContainer = $HUD/EndCard
 @onready var end_title: Label = $HUD/EndCard/Margin/VBox/EndTitle
 @onready var end_scores: Label = $HUD/EndCard/Margin/VBox/EndScores
@@ -203,6 +204,7 @@ func _show_setup() -> void:
 	_teardown_panes()
 	split_layer.visible = false
 	setup_panel.visible = true
+	end_dim.visible = false
 	end_panel.visible = false
 	timer_panel.visible = false
 	left_panel.visible = true
@@ -268,6 +270,7 @@ func _start_match() -> void:
 	_set_paused(false)
 	_screen = Screen.PLAYING
 	setup_panel.visible = false
+	end_dim.visible = false
 	end_panel.visible = false
 	_rebuild_panes()
 	split_layer.visible = true
@@ -276,6 +279,7 @@ func _start_match() -> void:
 
 func _show_end_card() -> void:
 	_screen = Screen.ENDED
+	end_dim.visible = true
 	end_panel.visible = true
 	end_title.text = sim.match_end_reason
 	var lines: PackedStringArray = PackedStringArray()
