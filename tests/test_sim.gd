@@ -800,20 +800,22 @@ func _check_building_tip_and_fall() -> int:
 	if float(prop.get("tip_angle", 1.0)) > 0.05:
 		print("FAIL tip did not recover; tip_angle=", prop.get("tip_angle", -1))
 		return 1
-	# Litter tips the same way when CoG enters a size-legal hole.
+	# Litter tips the same way when CoG is in-hole but upright disc is not covered.
 	sim.objects.clear()
 	hole["x"] = 0.0
 	hole["y"] = 0.0
 	hole["radius"] = 1.0
 	hole["mass"] = 1.0
 	var litter_r: float = MunchiesSim.TIER0_RADIUS
-	sim.objects.append(MunchiesSim.make_prop(3, 0.7, 0.0, 0, litter_r))
-	assert(not MunchiesSim.prop_fully_covered(0.7, litter_r, 1.0))
+	var litter_x: float = 0.85 ## CoG inside; 0.85+0.25 > 1.0 so not full-disc covered
+	assert(litter_x <= 1.0)
+	assert(not MunchiesSim.prop_fully_covered(litter_x, litter_r, 1.0))
+	sim.objects.append(MunchiesSim.make_prop(3, litter_x, 0.0, 0, litter_r))
 	for i in 20:
 		sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0)
 	prop = sim.objects[0] if not sim.objects.is_empty() else {}
 	if prop.is_empty():
-		# Rim tip + size gate may already have swallowed — that is also correct.
+		# Rim tip-commit + size gate may already have swallowed — also correct.
 		print("ok building tip and fall")
 		return 0
 	if float(prop.get("tip_angle", 0.0)) < 0.15 and not bool(prop.get("fallen", false)):
