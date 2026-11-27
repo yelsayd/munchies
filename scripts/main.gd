@@ -36,6 +36,8 @@ enum PauseChoice { RESUME, RESTART, EXIT }
 @onready var world3d_hold: Node = $World3DHold
 @onready var pane_host: Control = $SplitLayer/PaneHost
 @onready var hud: CanvasLayer = $HUD
+@onready var hud_band_bg: ColorRect = $HUD/HudBandBg
+@onready var hud_band_edge: ColorRect = $HUD/HudBandEdge
 @onready var title_label: Label = $HUD/Margin/VBox/Title
 @onready var mode_line: Label = $HUD/Margin/VBox/ModeLine
 @onready var score_label: Label = $HUD/Margin/VBox/Score
@@ -942,7 +944,11 @@ func _update_camera_3d(pane: Dictionary, hole: Dictionary, blend: float) -> void
 func _update_hud() -> void:
 	if _screen != Screen.PLAYING or sim == null or sim.config == null:
 		return
-	pane_host.offset_top = _hud_band_height()
+	var band_h: float = _hud_band_height()
+	pane_host.offset_top = band_h
+	hud_band_bg.offset_bottom = band_h
+	hud_band_edge.offset_top = band_h - 1.0
+	hud_band_edge.offset_bottom = band_h
 	title_label.text = "Munchies — %s" % sim.config.label()
 	mode_line.text = _mode_line_text()
 	if sim.holes.size() > 1:

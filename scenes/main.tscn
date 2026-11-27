@@ -37,6 +37,23 @@ mouse_filter = 2
 [node name="HUD" type="CanvasLayer" parent="."]
 layer = 1
 
+[node name="HudBandBg" type="ColorRect" parent="HUD"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 72.0
+grow_horizontal = 2
+mouse_filter = 2
+color = Color(0.03, 0.035, 0.04, 0.94)
+
+[node name="HudBandEdge" type="ColorRect" parent="HUD"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 71.0
+offset_bottom = 72.0
+grow_horizontal = 2
+mouse_filter = 2
+color = Color(0.18, 0.22, 0.2, 0.85)
+
 [node name="Margin" type="MarginContainer" parent="HUD"]
 anchors_preset = 15
 anchor_right = 1.0

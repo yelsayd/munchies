@@ -71,8 +71,8 @@ func sync_from_sim() -> void:
 	if sim == null or sim.holes.is_empty():
 		return
 
-	# Include a layout version so lane dashes / raised hole fill rebuild on upgrade.
-	var seed_key: int = hash(sim.map_half) ^ (sim.roads.size() * 17) ^ (sim.parks.size() * 31) ^ 3
+	# Include a layout version so ground texture / roads rebuild on upgrade.
+	var seed_key: int = hash(sim.map_half) ^ (sim.roads.size() * 17) ^ (sim.parks.size() * 31) ^ 5
 	if seed_key != _static_seed:
 		_rebuild_static(sim)
 		_static_seed = seed_key
@@ -92,6 +92,8 @@ func _rebuild_static(sim: MunchiesSim) -> void:
 		Vector3(half * 2.0, 0.1, half * 2.0),
 		COL_GROUND
 	))
+	_add_ground_texture(half)
+	_add_city_lots(half)
 
 	# Border rim
 	var border_h := 0.6
@@ -137,6 +139,73 @@ func _rebuild_static(sim: MunchiesSim) -> void:
 		_static_root.add_child(_make_cylinder(
 			Vector3(pad.x, 0.07, pad.y), 2.2, 0.05, Color(0.32, 0.36, 0.33, 0.7)
 		))
+
+
+func _hash2(a: int, b: int) -> float:
+	var n: int = a * 374761393 + b * 668265263
+	n = (n ^ (n >> 13)) * 1274126177
+	return float((n ^ (n >> 16)) & 0x7fffffff) / 2147483647.0
+
+
+func _add_ground_texture(half: float) -> void:
+	## Scatter low turf / dirt patches so the ground isn't a flat slab.
+	var step := 7.0
+	var cells: int = int(ceil(half / step)) + 1
+	for i in range(-cells, cells + 1):
+		for j in range(-cells, cells + 1):
+			var h: float = _hash2(i * 5 + 2, j * 9 + 4)
+			if h < 0.38:
+				continue
+			var x: float = float(i) * step + (h - 0.5) * 2.0
+			var z: float = float(j) * step + (_hash2(j, i) - 0.5) * 2.0
+			if absf(x) > half - 2.0 or absf(z) > half - 2.0:
+				continue
+			# Skip the densest road corridors so patches don't fight asphalt.
+			if absf(x) < 8.0 or absf(z) < 8.0:
+				continue
+			var w: float = 2.2 + h * 3.4
+			var d: float = 1.8 + (1.0 - h) * 3.0
+			var col: Color
+			if h > 0.78:
+				col = Color(0.30, 0.27, 0.20) ## worn dirt
+			elif h > 0.55:
+				col = COL_GROUND.lightened(0.06 + h * 0.05)
+			else:
+				col = COL_GROUND.darkened(0.05)
+			_static_root.add_child(_make_box(
+				Vector3(x, 0.01, z),
+				Vector3(w, 0.03, d),
+				col
+			))
+
+
+func _add_city_lots(half: float) -> void:
+	## Lot pads between streets — same idea as 2D city blocks.
+	var step := 16.0
+	var margin := 6.0
+	var x: float = -half + margin
+	while x < half - margin:
+		var z: float = -half + margin
+		while z < half - margin:
+			var cx: float = x + step * 0.4
+			var cz: float = z + step * 0.4
+			if absf(cx) < 12.0 or absf(cz) < 12.0:
+				z += step
+				continue
+			var h: float = _hash2(int(x * 10.0), int(z * 10.0))
+			if h < 0.30:
+				z += step
+				continue
+			var w: float = step * (0.55 + h * 0.22)
+			var d: float = step * (0.48 + (1.0 - h) * 0.2)
+			var lot := Color(0.24, 0.25, 0.23).lightened((h - 0.5) * 0.05)
+			_static_root.add_child(_make_box(
+				Vector3(cx, 0.015, cz),
+				Vector3(w, 0.025, d),
+				lot
+			))
+			z += step
+		x += step
 
 
 func _add_lane_dashes(road: Rect2) -> void:

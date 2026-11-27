@@ -267,14 +267,33 @@ func _layout_phase2_map(world_seed: int) -> void:
 		{"center": Vector2(-30, 24), "radius": 14.0},
 	]
 
-	# Road / lot bands (cosmetic + tier-2 placement guides).
+	# Road grid: arterials + secondary avenues + local connectors (cosmetic + tier-2 guides).
 	roads = [
-		Rect2(-70, -6, 140, 12),
-		Rect2(-6, -70, 12, 140),
-		Rect2(-50, 30, 40, 10),
-		Rect2(20, -45, 35, 10),
-		Rect2(-40, -50, 10, 35),
-		Rect2(35, 20, 10, 40),
+		# Main cross
+		Rect2(-74, -5.5, 148, 11),
+		Rect2(-5.5, -74, 11, 148),
+		# Secondary avenues (E–W)
+		Rect2(-74, -38, 148, 8),
+		Rect2(-74, 30, 148, 8),
+		# Secondary avenues (N–S)
+		Rect2(-38, -74, 8, 148),
+		Rect2(30, -74, 8, 148),
+		# Outer ring segments near the edge
+		Rect2(-70, -62, 55, 7),
+		Rect2(18, -62, 52, 7),
+		Rect2(-70, 52, 55, 7),
+		Rect2(18, 52, 52, 7),
+		Rect2(-62, -70, 7, 40),
+		Rect2(-62, 28, 7, 42),
+		Rect2(55, -70, 7, 40),
+		Rect2(55, 28, 7, 42),
+		# Short local streets / lots
+		Rect2(-52, 14, 36, 7),
+		Rect2(14, -42, 36, 7),
+		Rect2(-48, -52, 7, 28),
+		Rect2(40, 10, 7, 34),
+		Rect2(16, -22, 30, 7),
+		Rect2(-46, 6, 28, 7),
 	]
 
 	# --- Tier 0 litter: parks + dense rings/trails at every spawn so the inward path reads ---
@@ -302,8 +321,8 @@ func _layout_phase2_map(world_seed: int) -> void:
 	_scatter_props(1, TIER1_RADIUS, 16, Vector2(-30, 24), 14.0, 3.0)
 	_scatter_props(1, TIER1_RADIUS, 16, Vector2(0, 0), 45.0, 8.0)
 
-	# --- Tier 2 vehicles (28): roads and lots ---
-	_place_on_roads(2, TIER2_RADIUS, 28)
+	# --- Tier 2 vehicles: roads and lots (more streets → a few more cars) ---
+	_place_on_roads(2, TIER2_RADIUS, 36)
 
 	# --- Tier 3 small buildings (16): edges with path gaps ---
 	_place_edge_landmarks(3, TIER3_RADIUS, [

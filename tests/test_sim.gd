@@ -184,6 +184,9 @@ func _check_phase2_map() -> int:
 	if sim.parks.size() < 3:
 		print("FAIL expected parks")
 		return 1
+	if sim.roads.size() < 12:
+		print("FAIL expected denser road grid, got ", sim.roads.size())
+		return 1
 	if MunchiesSim.SPAWN_PADS.size() != 4:
 		print("FAIL expected 4 spawn pads")
 		return 1

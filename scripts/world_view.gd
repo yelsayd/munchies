@@ -145,22 +145,34 @@ func _draw() -> void:
 
 func _draw_ground(half: float) -> void:
 	draw_rect(Rect2(Vector2(-half, -half), Vector2(half * 2.0, half * 2.0)), COL_GROUND)
-	# Quiet turf patches — small rectangles, not giant blobs.
-	var step: float = 10.0 * PIXELS_PER_METER
-	var i := -10
-	while i <= 10:
-		var j := -10
-		while j <= 10:
-			var h: float = _hash2(i * 3, j * 5)
-			if h > 0.62:
-				var c := Vector2(float(i) * step * 0.7, float(j) * step * 0.7)
-				var w: float = step * (0.22 + h * 0.18)
-				var ht: float = step * (0.16 + (1.0 - h) * 0.14)
-				var tint := COL_GROUND.lightened(0.03 + h * 0.05)
-				tint.a = 0.4
-				draw_rect(Rect2(c - Vector2(w, ht) * 0.5, Vector2(w, ht)), tint)
-			j += 1
-		i += 1
+	# Fine turf / dirt noise — denser than before so the lawn reads as textured.
+	var fine: float = 4.5 * PIXELS_PER_METER
+	var cells: int = int(ceil(half / fine)) + 2
+	for i in range(-cells, cells + 1):
+		for j in range(-cells, cells + 1):
+			var h: float = _hash2(i * 7 + 1, j * 11 + 3)
+			var c := Vector2(float(i) * fine, float(j) * fine)
+			if c.length() > half + fine:
+				continue
+			var w: float = fine * (0.55 + h * 0.4)
+			var ht: float = fine * (0.45 + (1.0 - h) * 0.4)
+			var tint: Color
+			if h > 0.72:
+				# Dry dirt / worn patches
+				tint = Color(0.28, 0.26, 0.20, 0.35 + h * 0.15)
+			elif h > 0.45:
+				# Lighter grass
+				tint = COL_GROUND.lightened(0.04 + h * 0.07)
+				tint.a = 0.32 + h * 0.2
+			else:
+				# Deeper turf
+				tint = COL_GROUND.darkened(0.04 + (1.0 - h) * 0.06)
+				tint.a = 0.28 + (1.0 - h) * 0.18
+			draw_rect(Rect2(c - Vector2(w, ht) * 0.5, Vector2(w, ht)), tint)
+			# Occasional gravel speckles
+			if h > 0.88:
+				var speck := Color(0.36, 0.34, 0.28, 0.4)
+				draw_circle(c + Vector2(fine * 0.15, -fine * 0.1), fine * 0.08, speck)
 
 
 func _draw_city_blocks(half: float) -> void:
