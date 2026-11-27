@@ -16,6 +16,11 @@ const GROW_FLASH_SEC := 0.34
 const SWALLOW_DROP_M := 5.5
 const PANE_GAP := 3.0
 const TOP_HUD_BAND := 72.0
+## Extra HUD band height per leaderboard row (multiplayer).
+const TOP_HUD_ROW := 18.0
+## Swallow blip: your hole loud, rivals duck so yours stays clear.
+const BLIP_VOL_MINE_DB := -5.0
+const BLIP_VOL_OTHER_DB := -26.0
 ## 3D camera: height / back offset in hole-radii (tilted chase).
 const CAM3D_HEIGHT_MULT := 9.0
 const CAM3D_BACK_MULT := 11.0
@@ -23,6 +28,7 @@ const CAM3D_BASE_M := 6.0
 
 enum Screen { SETUP, PLAYING, ENDED }
 enum SetupFocus { MODES, SLOTS }
+enum PauseChoice { RESUME, RESTART, EXIT }
 
 @onready var world: Node2D = $World
 @onready var world_hold: Node2D = $WorldHold
@@ -44,11 +50,14 @@ enum SetupFocus { MODES, SLOTS }
 @onready var end_title: Label = $HUD/EndCard/Margin/VBox/EndTitle
 @onready var end_scores: Label = $HUD/EndCard/Margin/VBox/EndScores
 @onready var end_hint: Label = $HUD/EndCard/Margin/VBox/EndHint
+@onready var pause_overlay: Control = $HUD/Pause
+@onready var pause_list: ItemList = $HUD/Pause/Panel/Margin/VBox/PauseList
 @onready var blip_player: AudioStreamPlayer = $BlipPlayer
 @onready var split_layer: CanvasLayer = $SplitLayer
 
 var sim: MunchiesSim
 var _paused := false
+var _pause_cursor: int = 0
 var _screen: Screen = Screen.SETUP
 var _mode_index: int = 0 ## Timer highlighted by default
 var _setup_focus: SetupFocus = SetupFocus.MODES
@@ -92,11 +101,15 @@ func _ready() -> void:
 	pane_host.set_anchors_preset(Control.PRESET_FULL_RECT)
 	pane_host.offset_top = TOP_HUD_BAND
 	split_layer.visible = false
+	pause_overlay.visible = false
 	# Script owns ↑↓; ItemLists must not also consume ui_up/ui_down via focus.
 	setup_list.focus_mode = Control.FOCUS_NONE
 	slot_list.focus_mode = Control.FOCUS_NONE
+	pause_list.focus_mode = Control.FOCUS_NONE
 	setup_list.item_clicked.connect(_on_mode_item_clicked)
 	slot_list.item_clicked.connect(_on_slot_item_clicked)
+	pause_list.item_clicked.connect(_on_pause_item_clicked)
+	_build_pause_list()
 	_build_setup_list()
 	_refresh_slot_list()
 	_show_setup()
@@ -187,7 +200,7 @@ func _pane_layout_label(n: int) -> String:
 
 func _show_setup() -> void:
 	_screen = Screen.SETUP
-	_paused = false
+	_set_paused(false)
 	_teardown_panes()
 	split_layer.visible = false
 	setup_panel.visible = true
@@ -253,7 +266,7 @@ func _start_match() -> void:
 	for h_v in sim.holes:
 		var h: Dictionary = h_v
 		_last_grow_radius[int(h["id"])] = float(h["radius"])
-	_paused = false
+	_set_paused(false)
 	_screen = Screen.PLAYING
 	setup_panel.visible = false
 	end_panel.visible = false
@@ -356,14 +369,21 @@ func _toggle_slot(index: int) -> void:
 
 
 func _process_playing(dt: float) -> void:
+	if _paused:
+		_process_pause_menu()
+		_update_hud()
+		return
+
 	# Shared pause: Esc freezes the whole sim for every pane.
 	if Input.is_action_just_pressed("pause"):
-		_paused = not _paused
+		_set_paused(true)
+		_update_hud()
+		return
 
 	if Input.is_action_just_pressed("toggle_view"):
 		_toggle_view_mode()
 
-	if not _paused and not sim.match_over:
+	if not sim.match_over:
 		var inputs := _collect_inputs()
 		var events: Array = sim.step(inputs, dt)
 		_handle_events(events)
@@ -380,6 +400,53 @@ func _process_playing(dt: float) -> void:
 			world3d.sync_from_sim()
 	elif world != null:
 		world.queue_redraw()
+
+
+func _build_pause_list() -> void:
+	pause_list.clear()
+	pause_list.add_item("Resume")
+	pause_list.add_item("Restart match")
+	pause_list.add_item("Exit to setup")
+	_pause_cursor = 0
+	pause_list.select(_pause_cursor)
+
+
+func _on_pause_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
+	_pause_cursor = clampi(index, 0, pause_list.item_count - 1)
+	pause_list.select(_pause_cursor)
+	_confirm_pause_choice()
+
+
+func _set_paused(paused: bool) -> void:
+	_paused = paused
+	pause_overlay.visible = paused and _screen == Screen.PLAYING
+	if paused:
+		_pause_cursor = 0
+		pause_list.select(_pause_cursor)
+
+
+func _process_pause_menu() -> void:
+	if Input.is_action_just_pressed("pause"):
+		_set_paused(false)
+		return
+	if Input.is_action_just_pressed("ui_up") or Input.is_action_just_pressed("move_up"):
+		_pause_cursor = (_pause_cursor - 1 + pause_list.item_count) % pause_list.item_count
+		pause_list.select(_pause_cursor)
+	elif Input.is_action_just_pressed("ui_down") or Input.is_action_just_pressed("move_down"):
+		_pause_cursor = (_pause_cursor + 1) % pause_list.item_count
+		pause_list.select(_pause_cursor)
+	if Input.is_action_just_pressed("confirm"):
+		_confirm_pause_choice()
+
+
+func _confirm_pause_choice() -> void:
+	match _pause_cursor:
+		PauseChoice.RESUME:
+			_set_paused(false)
+		PauseChoice.RESTART:
+			_start_match()
+		PauseChoice.EXIT:
+			_show_setup()
 
 
 func _process_ended() -> void:
@@ -432,11 +499,18 @@ func _handle_events(events: Array) -> void:
 				"tip_dy": float(ev.get("tip_dy", 0.0)),
 			})
 			# Rim flash is grow-only — swallow still gets an audio blip.
+			# Duck rivals so your own swallows stay clear.
 			if blip_player.stream != null:
+				var mine := _keyboard_hole()
+				var mine_id: int = int(mine.get("id", -1)) if not mine.is_empty() else -1
+				blip_player.volume_db = (
+					BLIP_VOL_MINE_DB if hid == mine_id else BLIP_VOL_OTHER_DB
+				)
 				blip_player.pitch_scale = 1.0 + 0.04 * float(ev.get("tier", 0))
 				blip_player.play()
 		elif kind == MunchiesSim.EVENT_ELIMINATED:
 			if blip_player.stream != null:
+				blip_player.volume_db = BLIP_VOL_MINE_DB
 				blip_player.pitch_scale = 0.7
 				blip_player.play()
 
@@ -644,40 +718,52 @@ func _rebuild_panes_2d() -> void:
 	world.queue_redraw()
 
 
-func _make_pane_overlay(frame: Control, hole: Dictionary, slot_fallback: int) -> Dictionary:
+func _make_pane_overlay(frame: Control, hole: Dictionary, _slot_fallback: int) -> Dictionary:
+	## Local score/radius sit top-right so they never clash with the left leaderboard.
+	## Hole names live on the hole mesh / 2D draw, not here.
 	var overlay := MarginContainer.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_theme_constant_override("margin_left", 10)
 	overlay.add_theme_constant_override("margin_top", 8)
-	overlay.add_theme_constant_override("margin_right", 10)
+	overlay.add_theme_constant_override("margin_right", 12)
 	overlay.add_theme_constant_override("margin_bottom", 8)
 	frame.add_child(overlay)
+
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(row)
+
+	var spacer := Control.new()
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
 
 	var vbox := VBoxContainer.new()
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_theme_constant_override("separation", 2)
-	overlay.add_child(vbox)
-
-	var name_l := Label.new()
-	var slot: int = int(hole.get("slot", slot_fallback))
-	var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
-	name_l.text = str(hole.get("name", "Hole"))
-	name_l.add_theme_color_override("font_color", ring)
-	name_l.add_theme_font_size_override("font_size", 16)
-	vbox.add_child(name_l)
+	row.add_child(vbox)
 
 	var score_l := Label.new()
+	score_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	score_l.add_theme_color_override("font_color", Color(0.95, 0.95, 0.92))
 	score_l.add_theme_font_size_override("font_size", 22)
 	vbox.add_child(score_l)
 
 	var radius_l := Label.new()
+	radius_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	radius_l.add_theme_color_override("font_color", Color(0.75, 0.88, 0.82))
 	radius_l.add_theme_font_size_override("font_size", 16)
 	vbox.add_child(radius_l)
 
 	return {"score": score_l, "radius": radius_l}
+
+
+func _hud_band_height() -> float:
+	## Leave room for title + mode + leaderboard so it does not sit on the world.
+	if sim != null and sim.holes.size() > 1:
+		return 52.0 + float(sim.holes.size()) * TOP_HUD_ROW + 8.0
+	return TOP_HUD_BAND
 
 
 func _keyboard_hole() -> Dictionary:
@@ -856,6 +942,7 @@ func _update_camera_3d(pane: Dictionary, hole: Dictionary, blend: float) -> void
 func _update_hud() -> void:
 	if _screen != Screen.PLAYING or sim == null or sim.config == null:
 		return
+	pane_host.offset_top = _hud_band_height()
 	title_label.text = "Munchies — %s" % sim.config.label()
 	mode_line.text = _mode_line_text()
 	if sim.holes.size() > 1:
@@ -863,13 +950,13 @@ func _update_hud() -> void:
 		score_label.text = _leaderboard_text()
 		radius_label.text = ""
 	elif use_3d_view:
-		score_label.text = "3D spike · 1 pane (split deferred) · F3 → 2D"
+		score_label.text = "3D · F3 → 2D"
 		radius_label.text = ""
 	else:
 		score_label.text = "2D · F3 → 3D"
 		radius_label.text = ""
 	if _paused:
-		hint_label.text = "Paused (all panes) — Esc to resume"
+		hint_label.text = ""
 	elif sim.config.mode == MatchConfig.Mode.UNLIMITED:
 		# Unlimited: no clock, no target, no end card.
 		hint_label.text = "Unlimited sandbox — Esc pause · F3 view · leave running"

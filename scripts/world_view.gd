@@ -110,16 +110,21 @@ func _draw() -> void:
 		draw_circle(hpos, hr, Color(0.04, 0.04, 0.05))
 		draw_arc(hpos, hr * 0.72, 0.0, TAU, 48, Color(0.08, 0.08, 0.10, 0.7), 2.0, true)
 		draw_arc(hpos, hr, 0.0, TAU, 64, ring, 3.0, true)
+		# Name sits under the hole so it does not fight the HUD.
 		var label: String = str(hole.get("name", ""))
-		draw_string(
-			ThemeDB.fallback_font,
-			hpos + Vector2(-24, -hr - 10),
-			label,
-			HORIZONTAL_ALIGNMENT_LEFT,
-			-1,
-			14,
-			ring
-		)
+		if not label.is_empty():
+			var font: Font = ThemeDB.fallback_font
+			var fs := 14
+			var tw: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			draw_string(
+				font,
+				hpos + Vector2(-tw * 0.5, hr + 16.0),
+				label,
+				HORIZONTAL_ALIGNMENT_LEFT,
+				-1,
+				fs,
+				ring
+			)
 
 		if host.grow_flash > 0.0 and int(hole["id"]) == int(host.grow_flash_hole):
 			var flash_a: float = clampf(host.grow_flash / 0.34, 0.0, 1.0)

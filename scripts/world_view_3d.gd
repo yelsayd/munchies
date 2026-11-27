@@ -209,7 +209,13 @@ func _sync_holes(sim: MunchiesSim) -> void:
 		# Recreate if rim is not the current flat-ring ArrayMesh (old cylinder/torus rims).
 		if root != null:
 			var rim_n: MeshInstance3D = root.get_node_or_null("Rim") as MeshInstance3D
-			if rim_n == null or not (rim_n.mesh is ArrayMesh) or not bool(rim_n.get_meta("flat_ring", false)):
+			var needs_rebuild: bool = (
+				rim_n == null
+				or not (rim_n.mesh is ArrayMesh)
+				or not bool(rim_n.get_meta("flat_ring", false))
+				or root.get_node_or_null("Name") == null
+			)
+			if needs_rebuild:
 				root.queue_free()
 				_hole_nodes.erase(id)
 				root = null
@@ -435,6 +441,25 @@ func _make_hole_node(hole: Dictionary) -> Node3D:
 	flash.visible = false
 	root.add_child(flash)
 
+	# Billboard name under the rim (counter-scaled in _place_hole so radius growth
+	# does not stretch the glyphs).
+	var slot: int = int(hole.get("slot", 0))
+	var ring_col: Color = MunchiesSim.HOLE_RING_COLORS[
+		clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)
+	]
+	var nametag := Label3D.new()
+	nametag.name = "Name"
+	nametag.text = str(hole.get("name", ""))
+	nametag.font_size = 42
+	nametag.pixel_size = 0.014
+	nametag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	nametag.no_depth_test = true
+	nametag.outline_size = 10
+	nametag.outline_modulate = Color(0.02, 0.02, 0.03, 0.85)
+	nametag.modulate = ring_col
+	nametag.position = Vector3(0.0, 0.28, 1.2)
+	root.add_child(nametag)
+
 	return root
 
 
@@ -472,6 +497,15 @@ func _place_hole(root: Node3D, hole: Dictionary, _sim: MunchiesSim) -> void:
 	var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
 	var rim: MeshInstance3D = root.get_node("Rim") as MeshInstance3D
 	var flash: MeshInstance3D = root.get_node("Flash") as MeshInstance3D
+	var nametag: Label3D = root.get_node_or_null("Name") as Label3D
+	if nametag != null:
+		nametag.text = str(hole.get("name", ""))
+		nametag.modulate = ring
+		# Keep glyph size + “just outside rim” placement stable as the hole grows.
+		var inv: float = 1.0 / maxf(r, 0.01)
+		nametag.scale = Vector3(inv, 1.0, inv)
+		nametag.position = Vector3(0.0, 0.28, 1.15)
+
 	var growing: bool = (
 		host != null
 		and host.grow_flash > 0.0

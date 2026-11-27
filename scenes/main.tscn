@@ -192,3 +192,75 @@ theme_override_colors/font_color = Color(0.7, 0.75, 0.7, 1)
 theme_override_font_sizes/font_size = 13
 text = "Enter/Space — back to setup"
 horizontal_alignment = 1
+
+[node name="Pause" type="Control" parent="HUD"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="HUD/Pause"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.02, 0.03, 0.04, 0.62)
+
+[node name="Panel" type="PanelContainer" parent="HUD/Pause"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -150.0
+offset_right = 200.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="HUD/Pause/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 22
+
+[node name="VBox" type="VBoxContainer" parent="HUD/Pause/Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PauseTitle" type="Label" parent="HUD/Pause/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "Paused"
+horizontal_alignment = 1
+
+[node name="PauseBody" type="Label" parent="HUD/Pause/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.84, 0.8, 1)
+theme_override_font_sizes/font_size = 15
+text = "The match is frozen."
+horizontal_alignment = 1
+
+[node name="PauseList" type="ItemList" parent="HUD/Pause/Panel/Margin/VBox"]
+custom_minimum_size = Vector2(0, 110)
+layout_mode = 2
+focus_mode = 0
+allow_reselect = true
+auto_height = true
+item_count = 0
+
+[node name="PauseHint" type="Label" parent="HUD/Pause/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.72, 0.68, 1)
+theme_override_font_sizes/font_size = 12
+text = "↑↓ choose · Enter confirm · Esc resume"
+horizontal_alignment = 1
