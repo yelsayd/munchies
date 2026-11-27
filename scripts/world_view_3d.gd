@@ -276,11 +276,45 @@ func _place_prop(node: MeshInstance3D, prop: Dictionary, sim: MunchiesSim) -> vo
 	var r: float = float(prop["radius"])
 	var tier: int = int(prop["tier"])
 	var h: float = _prop_height(tier, r)
-	node.position = Vector3(float(prop["x"]), h * 0.5, float(prop["y"]))
+	var px: float = float(prop["x"])
+	var pz: float = float(prop["y"])
+	if tier >= 3:
+		_place_building_tipped(node, prop, h)
+		return
+	node.transform = Transform3D.IDENTITY
+	node.position = Vector3(px, h * 0.5, pz)
 	if tier == 2:
 		node.rotation.y = -_prop_facing(prop, sim)
 	else:
-		node.rotation.y = 0.0
+		node.rotation = Vector3.ZERO
+
+
+func _place_building_tipped(node: MeshInstance3D, prop: Dictionary, height: float) -> void:
+	## Hinge on the footprint edge opposite the tip direction; lean toward the hole.
+	var r: float = float(prop["radius"])
+	var width: float = r * (1.8 if int(prop["tier"]) >= 4 else 1.6)
+	var tip_angle: float = float(prop.get("tip_angle", 0.0))
+	if bool(prop.get("fallen", false)):
+		tip_angle = PI * 0.5
+	var tdx: float = float(prop.get("tip_dx", 1.0))
+	var tdy: float = float(prop.get("tip_dy", 0.0))
+	var tip := Vector3(tdx, 0.0, tdy)
+	if tip.length_squared() < 0.0001:
+		tip = Vector3.RIGHT
+	else:
+		tip = tip.normalized()
+	# Positive rotation around this axis tips the top toward `tip`.
+	var axis := Vector3.UP.cross(tip)
+	if axis.length_squared() < 0.0001:
+		axis = Vector3.RIGHT
+	else:
+		axis = axis.normalized()
+	var basis := Basis(axis, tip_angle)
+	var hinge := -tip * (width * 0.5)
+	var local_from_hinge := tip * (width * 0.5) + Vector3(0.0, height * 0.5, 0.0)
+	var origin := Vector3(float(prop["x"]), 0.0, float(prop["y"]))
+	var mesh_center: Vector3 = origin + hinge + basis * local_from_hinge
+	node.transform = Transform3D(basis, mesh_center)
 
 
 func _apply_claim_tint(node: MeshInstance3D, prop: Dictionary, claimed: int, sim: MunchiesSim) -> void:

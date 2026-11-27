@@ -26,6 +26,17 @@ const PROP_CONSUME_MULT := 1.0 ## unused — swallow uses full coverage
 const PROP_PULL_ACCEL := 0.0 ## no gravity / no suction pull on props
 const PROP_PULL_MAX_SPEED := 0.0
 
+## Buildings / blocks (tier ≥ 3): tip when a hole contains the CoG; fall if not covered.
+const BUILDING_TIP_MIN_TIER := 3
+const BUILDING_TIP_RATE := 2.4 ## rad/s while CoG is inside a hole
+const BUILDING_TIP_RECOVER := 1.6 ## rad/s spring-back when CoG is free
+const BUILDING_FALL_ANGLE := PI * 0.5 ## 90° → fallen on its side
+## Footprint multipliers — keep in sync with world_view_3d mesh sizes.
+const BUILDING_WIDTH_MULT := 1.6
+const BUILDING_HEIGHT_MULT := 2.2
+const BLOCK_WIDTH_MULT := 1.8
+const BLOCK_HEIGHT_MULT := 2.8
+
 const PLAYER_EAT_RATIO := 0.80
 const PLAYER_SUCTION_MULT := 1.35
 const PLAYER_CONSUME_MULT := 0.55
@@ -116,6 +127,11 @@ static func make_prop(id: int, x: float, y: float, tier: int, radius: float) -> 
 		"tier": tier,
 		"claimed_by": -1,
 		"alive": true,
+		## Buildings (tier ≥ 3): tip toward hole; fallen swaps cover footprint.
+		"tip_angle": 0.0,
+		"fallen": false,
+		"tip_dx": 1.0,
+		"tip_dy": 0.0,
 	}
 
 
@@ -456,15 +472,96 @@ func _add_mass(hole: Dictionary, mass_gain: float) -> void:
 	hole["score_changed_tick"] = tick
 
 
-## True when the prop's full footprint sits inside the hole circle.
+## True when a circular footprint sits inside the hole (upright props / tipping buildings).
 ## Example: building r=3.2 needs hole r≥3.2 and center close enough that
 ## distance + 3.2 ≤ hole.radius — partial overlap is not enough.
 static func prop_fully_covered(dist: float, prop_radius: float, hole_radius: float) -> bool:
 	return dist + prop_radius <= hole_radius
 
 
-func _update_props(_dt: float, events: Array) -> void:
+static func building_dims(prop: Dictionary) -> Vector2:
+	## Returns (width, height) in meters matching the 3D box mesh.
+	var r: float = float(prop["radius"])
+	if int(prop["tier"]) >= 4:
+		return Vector2(r * BLOCK_WIDTH_MULT, r * BLOCK_HEIGHT_MULT)
+	return Vector2(r * BUILDING_WIDTH_MULT, r * BUILDING_HEIGHT_MULT)
+
+
+static func is_building_prop(prop: Dictionary) -> bool:
+	return int(prop.get("tier", 0)) >= BUILDING_TIP_MIN_TIER
+
+
+## Full cover against the prop's current footprint (disc upright, oriented box if fallen).
+static func hole_covers_prop(hole: Dictionary, prop: Dictionary) -> bool:
+	var hx: float = float(hole["x"])
+	var hy: float = float(hole["y"])
+	var hr: float = float(hole["radius"])
+	var px: float = float(prop["x"])
+	var py: float = float(prop["y"])
+	var pr: float = float(prop["radius"])
+	var cdist: float = Vector2(hx - px, hy - py).length()
+	if not bool(prop.get("fallen", false)):
+		return prop_fully_covered(cdist, pr, hr)
+	# Fallen: oriented ground rectangle (former height along tip_dir, width across).
+	var dims: Vector2 = building_dims(prop)
+	var tip := Vector2(float(prop.get("tip_dx", 1.0)), float(prop.get("tip_dy", 0.0)))
+	if tip.length_squared() < 0.0001:
+		tip = Vector2.RIGHT
+	else:
+		tip = tip.normalized()
+	var perp := Vector2(-tip.y, tip.x)
+	var half_len: float = dims.y * 0.5
+	var half_wid: float = dims.x * 0.5
+	var center := Vector2(px, py)
+	for s in [-1.0, 1.0]:
+		for t in [-1.0, 1.0]:
+			var corner: Vector2 = center + tip * (half_len * s) + perp * (half_wid * t)
+			if corner.distance_to(Vector2(hx, hy)) > hr:
+				return false
+	return true
+
+
+func _update_building_tip(prop: Dictionary, alive: Array, dt: float) -> void:
+	if not is_building_prop(prop):
+		return
+	if bool(prop.get("fallen", false)):
+		prop["tip_angle"] = BUILDING_FALL_ANGLE
+		return
+
+	var px: float = float(prop["x"])
+	var py: float = float(prop["y"])
+	# Closest hole whose disc contains the building CoG (center) drives the tip.
+	var tip_hole: Dictionary = {}
+	var tip_dist: float = INF
+	for hole_v in alive:
+		var hole: Dictionary = hole_v
+		var hx: float = float(hole["x"])
+		var hy: float = float(hole["y"])
+		var hr: float = float(hole["radius"])
+		var d: float = Vector2(hx - px, hy - py).length()
+		if d <= hr and d < tip_dist:
+			tip_dist = d
+			tip_hole = hole
+
+	var angle: float = float(prop.get("tip_angle", 0.0))
+	if not tip_hole.is_empty():
+		var dir := Vector2(float(tip_hole["x"]) - px, float(tip_hole["y"]) - py)
+		if dir.length_squared() > 0.0001:
+			dir = dir.normalized()
+			prop["tip_dx"] = dir.x
+			prop["tip_dy"] = dir.y
+		angle = minf(BUILDING_FALL_ANGLE, angle + BUILDING_TIP_RATE * dt)
+		if angle >= BUILDING_FALL_ANGLE - 0.001:
+			prop["fallen"] = true
+			angle = BUILDING_FALL_ANGLE
+	else:
+		angle = maxf(0.0, angle - BUILDING_TIP_RECOVER * dt)
+	prop["tip_angle"] = angle
+
+
+func _update_props(dt: float, events: Array) -> void:
 	## No gravity: props do not get pulled. The hole must fully cover them to swallow.
+	## Buildings tip when a hole crosses their CoG; fall on their side if not covered.
 	var alive: Array = _alive_holes()
 	if alive.is_empty():
 		return
@@ -482,6 +579,7 @@ func _update_props(_dt: float, events: Array) -> void:
 		# Static world props — no suction velocity.
 		prop["vx"] = 0.0
 		prop["vy"] = 0.0
+		_update_building_tip(prop, alive, dt)
 
 		# Closest qualifying hole claims (ring UI); others ignore a claimed prop.
 		var best_hole: Dictionary = {}
@@ -526,15 +624,10 @@ func _update_props(_dt: float, events: Array) -> void:
 		else:
 			prop["claimed_by"] = hole_id
 
-		var hx: float = float(best_hole["x"])
-		var hy: float = float(best_hole["y"])
 		var hr: float = float(best_hole["radius"])
 		var eat_limit: float = hr * PROP_EAT_RATIO
-		var cdx: float = hx - px
-		var cdy: float = hy - py
-		var cdist: float = sqrt(cdx * cdx + cdy * cdy)
-		# Swallow only when the whole prop disc is inside the hole (and size gate).
-		if pr <= eat_limit and prop_fully_covered(cdist, pr, hr):
+		# Swallow only when the current footprint is fully inside (and size gate).
+		if pr <= eat_limit and hole_covers_prop(best_hole, prop):
 			var mass_gain: float = pr * pr
 			_add_mass(best_hole, mass_gain)
 			prop["alive"] = false
