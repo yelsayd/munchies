@@ -191,6 +191,19 @@ func _check_phase2_map() -> int:
 	if sim.roads.size() < 12:
 		print("FAIL expected denser road grid, got ", sim.roads.size())
 		return 1
+	var through := 0
+	for road_v in sim.roads:
+		var road: Rect2 = road_v
+		if (
+			road.position.x < -sim.map_half + 0.5
+			or road.position.x + road.size.x > sim.map_half - 0.5
+			or road.position.y < -sim.map_half + 0.5
+			or road.position.y + road.size.y > sim.map_half - 0.5
+		):
+			through += 1
+	if through < 4:
+		print("FAIL expected through-roads past map edge, got ", through)
+		return 1
 	if MunchiesSim.SPAWN_PADS.size() != 4:
 		print("FAIL expected 4 spawn pads")
 		return 1

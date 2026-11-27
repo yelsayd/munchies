@@ -72,7 +72,13 @@ func sync_from_sim() -> void:
 		return
 
 	# Include a layout version so ground texture / roads rebuild on upgrade.
-	var seed_key: int = hash(sim.map_half) ^ (sim.roads.size() * 17) ^ (sim.parks.size() * 31) ^ 5
+	var seed_key: int = (
+		hash(sim.map_half)
+		^ (sim.roads.size() * 17)
+		^ (sim.parks.size() * 31)
+		^ int(MunchiesSim.ROAD_OVERSHOOT * 10.0)
+		^ 6
+	)
 	if seed_key != _static_seed:
 		_rebuild_static(sim)
 		_static_seed = seed_key
@@ -85,19 +91,20 @@ func sync_from_sim() -> void:
 func _rebuild_static(sim: MunchiesSim) -> void:
 	_clear_children(_static_root)
 	var half: float = sim.map_half
+	var ground_half: float = half + MunchiesSim.ROAD_OVERSHOOT
 
-	# Ground plane (slightly below y=0 so roads sit flush).
+	# Ground plane extends past the playable rim so off-map roads/traffic have footing.
 	_static_root.add_child(_make_box(
 		Vector3(0.0, -0.05, 0.0),
-		Vector3(half * 2.0, 0.1, half * 2.0),
+		Vector3(ground_half * 2.0, 0.1, ground_half * 2.0),
 		COL_GROUND
 	))
 	_add_ground_texture(half)
 	_add_city_lots(half)
 
-	# Border rim
-	var border_h := 0.6
-	var t := 0.8
+	# Low curb at the playable edge (roads continue past it; not a wall).
+	var border_h := 0.14
+	var t := 0.55
 	_static_root.add_child(_make_box(Vector3(0, border_h * 0.5, -half), Vector3(half * 2.0 + t, border_h, t), COL_BORDER))
 	_static_root.add_child(_make_box(Vector3(0, border_h * 0.5, half), Vector3(half * 2.0 + t, border_h, t), COL_BORDER))
 	_static_root.add_child(_make_box(Vector3(-half, border_h * 0.5, 0), Vector3(t, border_h, half * 2.0), COL_BORDER))

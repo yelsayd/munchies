@@ -105,6 +105,11 @@ const PERSON_COLORS := [
 ]
 ## Extra clearance when rejecting overlapping spawns.
 const SPAWN_GAP := 0.35
+## Roads / traffic continue this far past the playable map edge.
+const ROAD_OVERSHOOT := 18.0
+const TARGET_VEHICLES := 36
+const TARGET_PEOPLE := 30
+const EDGE_SPAWN_INTERVAL := 0.45
 
 ## Full map is 160 × 160 m → half-extent 80.
 const MAP_HALF_DEFAULT := 80.0
@@ -148,6 +153,7 @@ var _next_id: int = 1
 var _rng := RandomNumberGenerator.new()
 var _pending_hole_respawns: Array = [] ## {id, at}
 var _pending_prop_spawns: Array = [] ## {tier, at, x, y}
+var _edge_spawn_cd: float = 0.0
 
 
 static func make_hole(
@@ -310,27 +316,28 @@ func _layout_phase2_map(world_seed: int) -> void:
 		{"center": Vector2(-30, 24), "radius": 14.0},
 	]
 
-	# Road grid: arterials + secondary avenues + local connectors (cosmetic + tier-2 guides).
+	# Road grid: through-streets run past the map edge so traffic can enter from off-map.
+	var ext: float = map_half + ROAD_OVERSHOOT
+	var span: float = ext * 2.0
 	roads = [
-		# Main cross
-		Rect2(-74, -5.5, 148, 11),
-		Rect2(-5.5, -74, 11, 148),
-		# Secondary avenues (E–W)
-		Rect2(-74, -38, 148, 8),
-		Rect2(-74, 30, 148, 8),
-		# Secondary avenues (N–S)
-		Rect2(-38, -74, 8, 148),
-		Rect2(30, -74, 8, 148),
-		# Outer ring segments near the edge
-		Rect2(-70, -62, 55, 7),
-		Rect2(18, -62, 52, 7),
-		Rect2(-70, 52, 55, 7),
-		Rect2(18, 52, 52, 7),
-		Rect2(-62, -70, 7, 40),
-		Rect2(-62, 28, 7, 42),
-		Rect2(55, -70, 7, 40),
-		Rect2(55, 28, 7, 42),
-		# Short local streets / lots
+		# Main cross (edge → edge)
+		Rect2(-ext, -5.5, span, 11),
+		Rect2(-5.5, -ext, 11, span),
+		# Secondary avenues (E–W / N–S), also through
+		Rect2(-ext, -38, span, 8),
+		Rect2(-ext, 30, span, 8),
+		Rect2(-38, -ext, 8, span),
+		Rect2(30, -ext, 8, span),
+		# Outer ring segments near the edge (reach the rim)
+		Rect2(-ext, -62, ext - 18.0, 7),
+		Rect2(18, -62, ext - 18.0, 7),
+		Rect2(-ext, 52, ext - 18.0, 7),
+		Rect2(18, 52, ext - 18.0, 7),
+		Rect2(-62, -ext, 7, ext - 28.0),
+		Rect2(-62, 28, 7, ext - 28.0),
+		Rect2(55, -ext, 7, ext - 28.0),
+		Rect2(55, 28, 7, ext - 28.0),
+		# Short local streets / lots (interior)
 		Rect2(-52, 14, 36, 7),
 		Rect2(14, -42, 36, 7),
 		Rect2(-48, -52, 7, 28),
@@ -338,6 +345,7 @@ func _layout_phase2_map(world_seed: int) -> void:
 		Rect2(16, -22, 30, 7),
 		Rect2(-46, 6, 28, 7),
 	]
+	_edge_spawn_cd = 0.2
 
 	# --- Tier 0 litter: parks + dense rings/trails at every spawn so the inward path reads ---
 	_scatter_props(0, TIER0_RADIUS, 55, Vector2(0, 0), 16.0, 3.0)
@@ -603,6 +611,162 @@ func _retarget_person(prop: Dictionary) -> void:
 	prop["wander_t"] = _rng.randf_range(1.2, 3.5)
 
 
+func _count_alive_vehicles() -> int:
+	var n := 0
+	for prop_v in objects:
+		var prop: Dictionary = prop_v
+		if bool(prop["alive"]) and int(prop["tier"]) == 2:
+			n += 1
+	return n
+
+
+func _count_alive_people() -> int:
+	var n := 0
+	for prop_v in objects:
+		var prop: Dictionary = prop_v
+		if bool(prop["alive"]) and int(prop.get("role", ROLE_PROP)) == ROLE_PERSON:
+			n += 1
+	return n
+
+
+func _top_up_edge_traffic() -> void:
+	## Keep streets busy: spawn from off-map ends of through-roads / map rim.
+	## Empty-road layouts (unit tests / tiny maps) skip edge traffic entirely.
+	if roads.is_empty():
+		return
+	if _count_alive_vehicles() < TARGET_VEHICLES:
+		_try_spawn_inbound_vehicle()
+	if _count_alive_people() < TARGET_PEOPLE:
+		_try_spawn_inbound_person()
+
+
+func _through_road_entries() -> Array:
+	## Entry points just off the playable map, aimed inward along the road.
+	var entries: Array = []
+	for i in roads.size():
+		var road: Rect2 = roads[i]
+		if not _road_is_through(road):
+			continue
+		var horizontal: bool = road.size.x >= road.size.y
+		if horizontal:
+			var y: float = road.position.y + road.size.y * 0.5
+			var x_lo: float = road.position.x
+			var x_hi: float = road.position.x + road.size.x
+			if x_lo < -map_half + 0.5:
+				entries.append({
+					"road_i": i,
+					"x": x_lo + 1.5,
+					"y": y,
+					"horizontal": true,
+					"sign": 1.0,
+				})
+			if x_hi > map_half - 0.5:
+				entries.append({
+					"road_i": i,
+					"x": x_hi - 1.5,
+					"y": y,
+					"horizontal": true,
+					"sign": -1.0,
+				})
+		else:
+			var x: float = road.position.x + road.size.x * 0.5
+			var y_lo: float = road.position.y
+			var y_hi: float = road.position.y + road.size.y
+			if y_lo < -map_half + 0.5:
+				entries.append({
+					"road_i": i,
+					"x": x,
+					"y": y_lo + 1.5,
+					"horizontal": false,
+					"sign": 1.0,
+				})
+			if y_hi > map_half - 0.5:
+				entries.append({
+					"road_i": i,
+					"x": x,
+					"y": y_hi - 1.5,
+					"horizontal": false,
+					"sign": -1.0,
+				})
+	return entries
+
+
+func _try_spawn_inbound_vehicle() -> bool:
+	var entries: Array = _through_road_entries()
+	if entries.is_empty():
+		return false
+	## Shuffle a few picks so busy roads don't always win.
+	for _pick in mini(6, entries.size()):
+		var entry: Dictionary = entries[_rng.randi_range(0, entries.size() - 1)]
+		var road_i: int = int(entry["road_i"])
+		var road: Rect2 = roads[road_i]
+		var kind: int = _rng.randi_range(0, 2)
+		var r: float = TIER2_RADIUS * _rng.randf_range(0.72, 1.12)
+		if kind == VEHICLE_VAN:
+			r *= _rng.randf_range(1.15, 1.4)
+		elif kind == VEHICLE_TRUCK:
+			r *= _rng.randf_range(1.35, 1.7)
+		else:
+			r *= _rng.randf_range(0.85, 1.15)
+		var x: float = float(entry["x"])
+		var y: float = float(entry["y"])
+		if not _can_place_prop(x, y, r):
+			continue
+		var prop: Dictionary = make_prop(_alloc_id(), x, y, 2, r)
+		_configure_vehicle(prop, kind, road_i, bool(entry["horizontal"]))
+		var speed: float = _rng.randf_range(VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX)
+		var sign: float = float(entry["sign"])
+		if bool(entry["horizontal"]):
+			prop["vx"] = speed * sign
+			prop["vy"] = 0.0
+		else:
+			prop["vx"] = 0.0
+			prop["vy"] = speed * sign
+		objects.append(prop)
+		return true
+	return false
+
+
+func _try_spawn_inbound_person() -> bool:
+	## Walk in from just past the map rim toward a point inside the city.
+	for _try in 10:
+		var side: int = _rng.randi_range(0, 3)
+		var along: float = _rng.randf_range(-map_half * 0.92, map_half * 0.92)
+		var outside: float = map_half + _rng.randf_range(3.0, ROAD_OVERSHOOT * 0.85)
+		var x: float
+		var y: float
+		match side:
+			0:
+				x = -outside
+				y = along
+			1:
+				x = outside
+				y = along
+			2:
+				x = along
+				y = -outside
+			_:
+				x = along
+				y = outside
+		if not _can_place_prop(x, y, PERSON_RADIUS):
+			continue
+		var person: Dictionary = make_prop(_alloc_id(), x, y, 1, PERSON_RADIUS)
+		person["role"] = ROLE_PERSON
+		person["body_color"] = PERSON_COLORS[_rng.randi_range(0, PERSON_COLORS.size() - 1)]
+		var target := Vector2(
+			_rng.randf_range(-map_half * 0.45, map_half * 0.45),
+			_rng.randf_range(-map_half * 0.45, map_half * 0.45)
+		)
+		var dir := (target - Vector2(x, y)).normalized()
+		var speed: float = _rng.randf_range(PERSON_SPEED_MIN, PERSON_SPEED_MAX)
+		person["vx"] = dir.x * speed
+		person["vy"] = dir.y * speed
+		person["wander_t"] = _rng.randf_range(3.0, 6.0)
+		objects.append(person)
+		return true
+	return false
+
+
 func _place_edge_landmarks(tier: int, radius: float, positions: Array) -> void:
 	for pos_v in positions:
 		var pos: Vector2 = pos_v
@@ -684,6 +848,11 @@ func step(inputs_by_hole: Dictionary, dt: float) -> Array:
 	_update_props(dt, events)
 	if config != null and config.allow_player_eat:
 		_update_player_swallow(dt, events)
+
+	_edge_spawn_cd -= dt
+	if _edge_spawn_cd <= 0.0:
+		_edge_spawn_cd = EDGE_SPAWN_INTERVAL
+		_top_up_edge_traffic()
 
 	_check_match_end(events)
 	return events
@@ -909,11 +1078,17 @@ func _update_props(dt: float, events: Array) -> void:
 			and float(prop.get("tip_angle", 0.0)) < 0.05
 		)
 		if upright and int(prop["tier"]) == 2:
-			_drive_vehicle(prop, dt)
+			if _drive_vehicle(prop, dt):
+				prop["alive"] = false
+				to_remove.append(prop)
+				continue
 			px = float(prop["x"])
 			py = float(prop["y"])
 		elif upright and int(prop.get("role", ROLE_PROP)) == ROLE_PERSON:
-			_drive_person(prop, dt)
+			if _drive_person(prop, dt):
+				prop["alive"] = false
+				to_remove.append(prop)
+				continue
 			px = float(prop["x"])
 			py = float(prop["y"])
 		else:
@@ -1003,23 +1178,17 @@ func _update_props(dt: float, events: Array) -> void:
 	_resolve_mover_collisions()
 
 
-func _drive_person(prop: Dictionary, dt: float) -> void:
+func _drive_person(prop: Dictionary, dt: float) -> bool:
+	## Walk freely; leave the map when past the road overshoot (edge spawn replaces them).
 	prop["wander_t"] = float(prop.get("wander_t", 0.0)) - dt
 	if float(prop["wander_t"]) <= 0.0:
 		_retarget_person(prop)
-	var r: float = float(prop["radius"])
 	var x: float = float(prop["x"]) + float(prop["vx"]) * dt
 	var y: float = float(prop["y"]) + float(prop["vy"]) * dt
-	var min_c: float = -map_half + r
-	var max_c: float = map_half - r
-	if x < min_c or x > max_c:
-		prop["vx"] = -float(prop["vx"])
-		x = clampf(x, min_c, max_c)
-	if y < min_c or y > max_c:
-		prop["vy"] = -float(prop["vy"])
-		y = clampf(y, min_c, max_c)
 	prop["x"] = x
 	prop["y"] = y
+	var lim: float = map_half + ROAD_OVERSHOOT + 1.0
+	return absf(x) > lim or absf(y) > lim
 
 
 func _resolve_mover_collisions() -> void:
@@ -1134,19 +1303,35 @@ func _realign_vehicle_velocity(prop: Dictionary) -> void:
 		prop["vy"] = speed * sign_y
 
 
-func _drive_vehicle(prop: Dictionary, dt: float) -> void:
-	## Keep tier-2 vehicles on their road centerline; bounce at the ends.
+func _road_is_through(road: Rect2) -> bool:
+	## Through-streets reach past the playable map so traffic can enter/exit off-screen.
+	if road.size.x >= road.size.y:
+		return (
+			road.position.x < -map_half + 0.5
+			or road.position.x + road.size.x > map_half - 0.5
+		)
+	return (
+		road.position.y < -map_half + 0.5
+		or road.position.y + road.size.y > map_half - 0.5
+	)
+
+
+func _drive_vehicle(prop: Dictionary, dt: float) -> bool:
+	## Keep tier-2 vehicles on their road centerline.
+	## Through-roads: cruise off the map ends. Local streets: bounce at the ends.
 	var road_i: int = int(prop.get("road_i", -1))
 	if road_i < 0 or road_i >= roads.size():
 		road_i = _find_road_index(float(prop["x"]), float(prop["y"]))
 		prop["road_i"] = road_i
 	if road_i < 0 or road_i >= roads.size():
+		## No road (tests / tipped leftovers): stay put, do not cull.
 		prop["vx"] = 0.0
 		prop["vy"] = 0.0
-		return
+		return false
 	var road: Rect2 = roads[road_i]
 	var r: float = float(prop["radius"])
 	var horizontal: bool = road.size.x >= road.size.y
+	var through: bool = _road_is_through(road)
 	var speed: float = maxf(absf(float(prop["vx"])), absf(float(prop["vy"])))
 	if speed < 0.5:
 		speed = lerpf(VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX, 0.5)
@@ -1154,28 +1339,50 @@ func _drive_vehicle(prop: Dictionary, dt: float) -> void:
 	var y: float = float(prop["y"]) + float(prop["vy"]) * dt
 	if horizontal:
 		y = road.position.y + road.size.y * 0.5
-		var min_x: float = road.position.x + r
-		var max_x: float = road.position.x + road.size.x - r
-		if x <= min_x:
-			x = min_x
-			prop["vx"] = speed
-		elif x >= max_x:
-			x = max_x
-			prop["vx"] = -speed
 		prop["vy"] = 0.0
+		if absf(float(prop["vx"])) < 0.5:
+			prop["vx"] = speed
+		if through:
+			var pad: float = r + 0.75
+			if x < road.position.x - pad or x > road.position.x + road.size.x + pad:
+				prop["x"] = x
+				prop["y"] = y
+				return true
+		else:
+			var min_x: float = road.position.x + r
+			var max_x: float = road.position.x + road.size.x - r
+			if x <= min_x:
+				x = min_x
+				prop["vx"] = speed
+			elif x >= max_x:
+				x = max_x
+				prop["vx"] = -speed
 	else:
 		x = road.position.x + road.size.x * 0.5
-		var min_y: float = road.position.y + r
-		var max_y: float = road.position.y + road.size.y - r
-		if y <= min_y:
-			y = min_y
-			prop["vy"] = speed
-		elif y >= max_y:
-			y = max_y
-			prop["vy"] = -speed
 		prop["vx"] = 0.0
-	prop["x"] = clampf(x, -map_half + r, map_half - r)
-	prop["y"] = clampf(y, -map_half + r, map_half - r)
+		if absf(float(prop["vy"])) < 0.5:
+			prop["vy"] = speed
+		if through:
+			var pad_y: float = r + 0.75
+			if y < road.position.y - pad_y or y > road.position.y + road.size.y + pad_y:
+				prop["x"] = x
+				prop["y"] = y
+				return true
+		else:
+			var min_y: float = road.position.y + r
+			var max_y: float = road.position.y + road.size.y - r
+			if y <= min_y:
+				y = min_y
+				prop["vy"] = speed
+			elif y >= max_y:
+				y = max_y
+				prop["vy"] = -speed
+	prop["x"] = x
+	prop["y"] = y
+	if not through:
+		prop["x"] = clampf(x, -map_half + r, map_half - r)
+		prop["y"] = clampf(y, -map_half + r, map_half - r)
+	return false
 
 
 func _find_road_index(x: float, y: float) -> int:

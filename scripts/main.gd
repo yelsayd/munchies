@@ -8,12 +8,12 @@ extends Node2D
 const PIXELS_PER_METER := 24.0
 const CAMERA_SETTLE := 0.2
 const HOLE_SCREEN_FRACTION := 0.20 ## diameter vs shorter pane side
-const SWALLOW_TWEEN_SEC := 0.38
+const SWALLOW_TWEEN_SEC := 0.72
 ## Rim pulse only after the hole grows by this much (not every swallow nibble).
 const GROW_FLASH_STEP := 0.12
 const GROW_FLASH_SEC := 0.34
 ## How far (meters) a swallowed prop falls straight down (no pull toward hole center).
-const SWALLOW_DROP_M := 5.5
+const SWALLOW_DROP_M := 7.0
 const PANE_GAP := 3.0
 ## Swallow blip: your hole loud, rivals duck so yours stays clear.
 const BLIP_VOL_MINE_DB := -5.0
@@ -543,12 +543,13 @@ func _tick_presentation(dt: float) -> void:
 		var tw: Dictionary = tw_v
 		tw["age"] = float(tw["age"]) + dt
 		var t: float = clampf(float(tw["age"]) / SWALLOW_TWEEN_SEC, 0.0, 1.0)
-		# Fall straight down at freeze x/y — accelerate into the pit, fade out.
+		# Fall straight down at freeze x/y — accelerate into the pit, fade late.
 		# No attraction toward the hole center (x/y stay where the swallow started).
 		var fall_t: float = t * t
 		tw["drop"] = fall_t * SWALLOW_DROP_M
-		tw["scale"] = 1.0 - 0.25 * t
-		tw["alpha"] = 1.0 - t
+		tw["scale"] = 1.0 - 0.2 * t
+		# Stay readable through most of the fall; fade only in the last third.
+		tw["alpha"] = 1.0 - smoothstep(0.55, 1.0, t)
 		if t < 1.0:
 			keep.append(tw)
 	swallow_tweens = keep
