@@ -658,6 +658,11 @@ func _update_props(dt: float, events: Array) -> void:
 				"x": px,
 				"y": py,
 				"radius": pr,
+				## Presentation: fall-in-place keeps tip pose while dropping.
+				"tip_angle": float(prop.get("tip_angle", 0.0)),
+				"fallen": bool(prop.get("fallen", false)),
+				"tip_dx": float(prop.get("tip_dx", 1.0)),
+				"tip_dy": float(prop.get("tip_dy", 0.0)),
 			})
 
 	for dead in to_remove:

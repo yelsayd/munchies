@@ -8,9 +8,9 @@ extends Node2D
 const PIXELS_PER_METER := 24.0
 const CAMERA_SETTLE := 0.2
 const HOLE_SCREEN_FRACTION := 0.20 ## diameter vs shorter pane side
-const SWALLOW_TWEEN_SEC := 0.28
-## How far (meters) a swallowed prop drops into the pit during the presentation tween.
-const SWALLOW_DROP_M := 2.4
+const SWALLOW_TWEEN_SEC := 0.38
+## How far (meters) a swallowed prop falls straight down (no pull toward hole center).
+const SWALLOW_DROP_M := 5.5
 const PANE_GAP := 3.0
 const TOP_HUD_BAND := 72.0
 ## 3D camera: height / back offset in hole-radii (tilted chase).
@@ -403,20 +403,21 @@ func _handle_events(events: Array) -> void:
 		var kind: StringName = ev["kind"]
 		if kind == MunchiesSim.EVENT_SWALLOWED:
 			var hid: int = int(ev.get("hole_id", -1))
-			var hole: Dictionary = sim.hole_by_id(hid)
-			var hx: float = float(hole.get("x", ev.get("x", 0.0)))
-			var hy: float = float(hole.get("y", ev.get("y", 0.0)))
+			# Freeze world x/y at the swallow spot — fall down, do not slide to hole center.
 			swallow_tweens.append({
-				"x": float(ev.get("x", hx)),
-				"y": float(ev.get("y", hy)),
-				"target_x": hx,
-				"target_y": hy,
+				"x": float(ev.get("x", 0.0)),
+				"y": float(ev.get("y", 0.0)),
 				"radius": float(ev.get("radius", 0.25)),
 				"tier": int(ev.get("tier", 0)),
 				"scale": 1.0,
-				"drop": 0.0, ## meters down into the pit (3D presentation)
+				"alpha": 1.0,
+				"drop": 0.0, ## meters straight down into the pit
 				"age": 0.0,
 				"hole_id": hid,
+				"tip_angle": float(ev.get("tip_angle", 0.0)),
+				"fallen": bool(ev.get("fallen", false)),
+				"tip_dx": float(ev.get("tip_dx", 1.0)),
+				"tip_dy": float(ev.get("tip_dy", 0.0)),
 			})
 			swallow_flash = 0.18
 			swallow_flash_hole = hid
@@ -438,17 +439,12 @@ func _tick_presentation(dt: float) -> void:
 		var tw: Dictionary = tw_v
 		tw["age"] = float(tw["age"]) + dt
 		var t: float = clampf(float(tw["age"]) / SWALLOW_TWEEN_SEC, 0.0, 1.0)
-		# Ease into the pit: shrink + drop (presentation only; sim already removed the prop).
-		var ease_t: float = t * t
-		tw["scale"] = 1.0 - t
-		tw["drop"] = ease_t * SWALLOW_DROP_M
-		var hole: Dictionary = sim.hole_by_id(int(tw.get("hole_id", -1)))
-		var hx: float = float(hole.get("x", tw["target_x"]))
-		var hy: float = float(hole.get("y", tw["target_y"]))
-		tw["x"] = lerpf(float(tw["x"]), hx, 1.0 - exp(-dt * 14.0))
-		tw["y"] = lerpf(float(tw["y"]), hy, 1.0 - exp(-dt * 14.0))
-		tw["target_x"] = hx
-		tw["target_y"] = hy
+		# Fall straight down at freeze x/y — accelerate into the pit, fade out.
+		# No attraction toward the hole center (x/y stay where the swallow started).
+		var fall_t: float = t * t
+		tw["drop"] = fall_t * SWALLOW_DROP_M
+		tw["scale"] = 1.0 - 0.25 * t
+		tw["alpha"] = 1.0 - t
 		if t < 1.0:
 			keep.append(tw)
 	swallow_tweens = keep

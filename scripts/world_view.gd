@@ -79,16 +79,24 @@ func _draw() -> void:
 				draw_arc(pos, r + 3.0, 0.0, TAU, 24, ring, 2.0, true)
 
 	# Active swallow tweens (presentation only; sim already removed the prop).
+	# Frozen x/y — fall/fade in place; hole disc drawn after occludes what's over the pit.
 	for tw in host.swallow_tweens:
 		var t: Dictionary = tw
+		var alpha: float = float(t.get("alpha", t.get("scale", 1.0)))
+		if alpha < 0.04:
+			continue
 		var pos := Vector2(float(t["x"]), float(t["y"])) * PIXELS_PER_METER
-		var r: float = float(t["radius"]) * float(t["scale"]) * PIXELS_PER_METER
+		var r: float = float(t["radius"]) * float(t.get("scale", 1.0)) * PIXELS_PER_METER
 		# Skip tiny polys — Godot triangulation fails on degenerate car/building quads.
 		if r < 2.0:
 			continue
 		var col: Color = TIER_COLORS.get(int(t["tier"]), Color.WHITE) as Color
-		col.a = float(t["scale"])
-		_draw_tier_shape(int(t["tier"]), pos, r, col, 0, 0.0)
+		col.a = alpha
+		var tier: int = int(t["tier"])
+		if tier >= 3 and (bool(t.get("fallen", false)) or float(t.get("tip_angle", 0.0)) > 0.05):
+			_draw_building_tipped(t, pos, r, col, tier >= 4)
+		else:
+			_draw_tier_shape(tier, pos, r, col, 0, 0.0)
 
 	# All holes (alive) on top; dead holes are invisible until respawn.
 	for hole_v in sim.holes:

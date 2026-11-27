@@ -194,26 +194,38 @@ func _sync_tweens() -> void:
 		return
 	for tw_v in host.swallow_tweens:
 		var tw: Dictionary = tw_v
-		var scale_v: float = float(tw["scale"])
-		if scale_v < 0.05:
+		var alpha: float = float(tw.get("alpha", tw.get("scale", 1.0)))
+		if alpha < 0.04:
 			continue
+		var scale_v: float = float(tw.get("scale", 1.0))
+		var r: float = float(tw["radius"])
+		var tier: int = int(tw["tier"])
 		var fake := {
 			"id": 0,
 			"x": float(tw["x"]),
 			"y": float(tw["y"]),
-			"radius": float(tw["radius"]) * scale_v,
-			"tier": int(tw["tier"]),
+			"radius": r * scale_v,
+			"tier": tier,
 			"claimed_by": -1,
 			"alive": true,
+			"tip_angle": float(tw.get("tip_angle", 0.0)),
+			"fallen": bool(tw.get("fallen", false)),
+			"tip_dx": float(tw.get("tip_dx", 1.0)),
+			"tip_dy": float(tw.get("tip_dy", 0.0)),
 		}
 		var node := _make_prop_mesh(fake)
-		var col: Color = TIER_COLORS.get(int(tw["tier"]), Color.WHITE) as Color
-		col.a = scale_v
+		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
+		col.a = alpha
 		node.material_override = _mat(col, true)
 		_tweens_root.add_child(node)
-		var base_h: float = _prop_height(int(tw["tier"]), float(tw["radius"])) * 0.5 * scale_v
 		var drop: float = float(tw.get("drop", 0.0))
-		node.position = Vector3(float(tw["x"]), base_h - drop, float(tw["y"]))
+		# Freeze XZ; fall straight down past the rim (no slide toward hole center).
+		if tier >= 3:
+			_place_building_tipped(node, fake, _prop_height(tier, r * scale_v))
+			node.position.y -= drop
+		else:
+			var base_h: float = _prop_height(tier, r) * 0.5 * scale_v
+			node.position = Vector3(float(tw["x"]), base_h - drop, float(tw["y"]))
 		_tween_nodes.append(node)
 
 
