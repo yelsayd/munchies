@@ -32,6 +32,8 @@ func _init() -> void:
 	failed += _check_bot_emits_input()
 	failed += _check_bot_hunts_smaller_hole()
 	failed += _check_vehicles_drive()
+	failed += _check_spawn_no_overlap()
+	failed += _check_people_and_lamps()
 	failed += _check_player_swallow()
 	failed += _check_cover_to_swallow()
 	failed += _check_building_tip_and_fall()
@@ -658,6 +660,66 @@ func _check_vehicles_drive() -> int:
 		print("FAIL vehicle should drive along roads: moved=", before.distance_to(after), " speed=", speed)
 		return 1
 	print("ok vehicles drive")
+	return 0
+
+
+func _check_spawn_no_overlap() -> int:
+	var sim := MunchiesSim.new()
+	sim.setup_phase2(7, 0)
+	for i in sim.objects.size():
+		var a: Dictionary = sim.objects[i]
+		if not bool(a["alive"]):
+			continue
+		for j in range(i + 1, sim.objects.size()):
+			var b: Dictionary = sim.objects[j]
+			if not bool(b["alive"]):
+				continue
+			var min_d: float = float(a["radius"]) + float(b["radius"]) + MunchiesSim.SPAWN_GAP * 0.5
+			var d: float = Vector2(float(a["x"]), float(a["y"])).distance_to(
+				Vector2(float(b["x"]), float(b["y"]))
+			)
+			if d < min_d - 0.01:
+				print("FAIL props overlap: ", a["id"], " & ", b["id"], " d=", d, " min=", min_d)
+				return 1
+	print("ok spawn no overlap")
+	return 0
+
+
+func _check_people_and_lamps() -> int:
+	var sim := MunchiesSim.new()
+	sim.setup_phase2(11, 0)
+	var lamps := 0
+	var people := 0
+	var person: Dictionary = {}
+	for p in sim.objects:
+		var role: int = int(p.get("role", 0))
+		if role == MunchiesSim.ROLE_LAMP:
+			lamps += 1
+		elif role == MunchiesSim.ROLE_PERSON:
+			people += 1
+			person = p
+	if lamps < 10:
+		print("FAIL expected light poles, got ", lamps)
+		return 1
+	if people < 10 or person.is_empty():
+		print("FAIL expected people, got ", people)
+		return 1
+	var before := Vector2(float(person["x"]), float(person["y"]))
+	for i in 60:
+		sim.step({int(sim.player_hole()["id"]): Vector2.ZERO}, 1.0 / 60.0)
+	var after := Vector2(float(person["x"]), float(person["y"]))
+	if before.distance_to(after) < 0.2:
+		print("FAIL people should walk")
+		return 1
+	# Cars should be slower than the old ~5–9 m/s band.
+	for p in sim.objects:
+		if int(p["tier"]) != 2 or not bool(p["alive"]):
+			continue
+		var spd: float = absf(float(p["vx"])) + absf(float(p["vy"]))
+		if spd > MunchiesSim.VEHICLE_SPEED_MAX + 0.5:
+			print("FAIL car too fast: ", spd)
+			return 1
+	print("ok people/lamps/speeds")
 	return 0
 
 

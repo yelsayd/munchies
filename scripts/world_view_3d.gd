@@ -338,6 +338,9 @@ func _sync_tweens() -> void:
 			"fallen": bool(tw.get("fallen", false)),
 			"tip_dx": float(tw.get("tip_dx", 1.0)),
 			"tip_dy": float(tw.get("tip_dy", 0.0)),
+			"role": int(tw.get("role", MunchiesSim.ROLE_PROP)),
+			"vehicle": int(tw.get("vehicle", 0)),
+			"body_color": tw.get("body_color", TIER_COLORS.get(tier, Color.WHITE)),
 		}
 		var node := _make_prop_node(fake)
 		_apply_prop_alpha(node, alpha)
@@ -354,9 +357,15 @@ func _sync_tweens() -> void:
 
 func _prop_mesh_key(prop: Dictionary) -> String:
 	var tier: int = int(prop["tier"])
+	var role: int = int(prop.get("role", 0))
+	if role == MunchiesSim.ROLE_LAMP:
+		return "lamp"
+	if role == MunchiesSim.ROLE_PERSON:
+		var pc: Color = prop.get("body_color", TIER_COLORS[1]) as Color
+		return "person:%s" % pc
 	if tier == 2:
 		var bc: Color = prop.get("body_color", TIER_COLORS[2]) as Color
-		return "2:%d:%s" % [int(prop.get("vehicle", 0)), bc]
+		return "2:%d:%.2f:%s" % [int(prop.get("vehicle", 0)), float(prop["radius"]), bc]
 	return "%d:%d" % [tier, int(prop.get("id", 0)) % 3]
 
 
@@ -368,6 +377,14 @@ func _make_prop_node(prop: Dictionary) -> Node3D:
 	var r: float = float(prop["radius"])
 	var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
 	var prop_id: int = int(prop.get("id", 0))
+	var role: int = int(prop.get("role", MunchiesSim.ROLE_PROP))
+	if role == MunchiesSim.ROLE_LAMP:
+		_build_lamp(root, r)
+		return root
+	if role == MunchiesSim.ROLE_PERSON:
+		var body: Color = prop.get("body_color", col) as Color
+		_build_person(root, r, body)
+		return root
 	match tier:
 		0:
 			_build_litter(root, r, col, prop_id)
@@ -441,6 +458,27 @@ func _build_street_prop(root: Node3D, r: float, col: Color, prop_id: int) -> voi
 			_add_prop_part(root, _make_cylinder(Vector3(0.0, r * 0.55, 0.0), r * 0.35, r * 0.45, col.lightened(0.1)), col.lightened(0.1))
 			_add_prop_part(root, _make_box(Vector3(r * 0.55, r * 0.15, 0.0), Vector3(r * 0.45, r * 0.28, r * 0.28), col), col)
 			_add_prop_part(root, _make_box(Vector3(-r * 0.55, r * 0.15, 0.0), Vector3(r * 0.45, r * 0.28, r * 0.28), col), col)
+
+
+func _build_lamp(root: Node3D, r: float) -> void:
+	## Very tall thin pole + small lamp head.
+	var pole_col := Color(0.22, 0.22, 0.24)
+	var head_col := Color(0.92, 0.88, 0.65)
+	var h: float = r * 8.0
+	_add_prop_part(root, _make_cylinder(Vector3(0.0, 0.0, 0.0), r * 0.35, h, pole_col), pole_col)
+	_add_prop_part(root, _make_box(Vector3(0.0, h * 0.48, 0.0), Vector3(r * 1.6, r * 0.7, r * 1.6), head_col), head_col)
+	_add_prop_part(root, _make_box(Vector3(0.0, -h * 0.48, 0.0), Vector3(r * 1.4, r * 0.35, r * 1.4), pole_col.darkened(0.15)), pole_col.darkened(0.15))
+
+
+func _build_person(root: Node3D, r: float, col: Color) -> void:
+	## Simple walker: legs stub + torso + head.
+	var cloth: Color = col
+	var skin := Color(0.86, 0.70, 0.58).lerp(col, 0.15)
+	var dark := col.darkened(0.25)
+	_add_prop_part(root, _make_box(Vector3(-r * 0.22, -r * 0.75, 0.0), Vector3(r * 0.28, r * 0.7, r * 0.28), dark), dark)
+	_add_prop_part(root, _make_box(Vector3(r * 0.22, -r * 0.75, 0.0), Vector3(r * 0.28, r * 0.7, r * 0.28), dark), dark)
+	_add_prop_part(root, _make_box(Vector3(0.0, -r * 0.05, 0.0), Vector3(r * 0.85, r * 1.1, r * 0.45), cloth), cloth)
+	_add_prop_part(root, _make_cylinder(Vector3(0.0, r * 0.85, 0.0), r * 0.32, r * 0.55, skin), skin)
 
 
 func _build_car(root: Node3D, r: float, col: Color, kind: int = 0) -> void:
@@ -534,6 +572,11 @@ func _build_building(root: Node3D, r: float, col: Color, is_block: bool, prop_id
 
 
 func _prop_height(tier: int, r: float, prop: Dictionary = {}) -> float:
+	var role: int = int(prop.get("role", MunchiesSim.ROLE_PROP))
+	if role == MunchiesSim.ROLE_LAMP:
+		return r * 8.0
+	if role == MunchiesSim.ROLE_PERSON:
+		return r * 2.4
 	match tier:
 		0:
 			return r * 0.7
@@ -553,10 +596,10 @@ func _prop_height(tier: int, r: float, prop: Dictionary = {}) -> float:
 
 
 func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
-	## Prefer drive velocity so moving cars face the way they travel.
+	## Prefer drive/walk velocity so movers face the way they travel.
 	var vx: float = float(prop.get("vx", 0.0))
 	var vy: float = float(prop.get("vy", 0.0))
-	if vx * vx + vy * vy > 0.25:
+	if vx * vx + vy * vy > 0.04:
 		return atan2(vy, vx)
 	var px: float = float(prop["x"])
 	var py: float = float(prop["y"])
@@ -580,7 +623,10 @@ func _place_prop(node: Node3D, prop: Dictionary, sim: MunchiesSim) -> void:
 	var r: float = float(prop["radius"])
 	var tier: int = int(prop["tier"])
 	var h: float = _prop_height(tier, r, prop)
-	var face_yaw: float = -_prop_facing(prop, sim) if tier == 2 else 0.0
+	var role: int = int(prop.get("role", MunchiesSim.ROLE_PROP))
+	var face_yaw: float = 0.0
+	if tier == 2 or role == MunchiesSim.ROLE_PERSON:
+		face_yaw = -_prop_facing(prop, sim)
 	var tip_angle: float = float(prop.get("tip_angle", 0.0))
 	if bool(prop.get("fallen", false)) or tip_angle > 0.01:
 		_place_prop_tipped(node, prop, h, face_yaw)

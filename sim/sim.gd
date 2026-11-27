@@ -75,8 +75,8 @@ const TIER4_RADIUS := 6.50
 const VEHICLE_SEDAN := 0
 const VEHICLE_VAN := 1
 const VEHICLE_TRUCK := 2
-const VEHICLE_SPEED_MIN := 5.0
-const VEHICLE_SPEED_MAX := 9.5
+const VEHICLE_SPEED_MIN := 2.0
+const VEHICLE_SPEED_MAX := 4.8
 const VEHICLE_COLORS := [
 	Color(0.32, 0.52, 0.88), ## blue
 	Color(0.86, 0.24, 0.22), ## red
@@ -87,6 +87,24 @@ const VEHICLE_COLORS := [
 	Color(0.58, 0.58, 0.62), ## silver
 	Color(0.92, 0.48, 0.18), ## orange
 ]
+
+## Special prop roles (beyond the eat-tier number).
+const ROLE_PROP := 0
+const ROLE_LAMP := 1
+const ROLE_PERSON := 2
+const LAMP_RADIUS := 0.22
+const PERSON_RADIUS := 0.38
+const PERSON_SPEED_MIN := 0.7
+const PERSON_SPEED_MAX := 1.6
+const PERSON_COLORS := [
+	Color(0.55, 0.42, 0.35),
+	Color(0.35, 0.40, 0.55),
+	Color(0.50, 0.35, 0.45),
+	Color(0.40, 0.50, 0.40),
+	Color(0.60, 0.48, 0.30),
+]
+## Extra clearance when rejecting overlapping spawns.
+const SPAWN_GAP := 0.35
 
 ## Full map is 160 × 160 m → half-extent 80.
 const MAP_HALF_DEFAULT := 80.0
@@ -180,6 +198,10 @@ static func make_prop(id: int, x: float, y: float, tier: int, radius: float) -> 
 		"vehicle": VEHICLE_SEDAN,
 		"body_color": VEHICLE_COLORS[0],
 		"road_i": -1,
+		## ROLE_PROP / ROLE_LAMP / ROLE_PERSON.
+		"role": ROLE_PROP,
+		## People wander retarget timer (seconds).
+		"wander_t": 0.0,
 	}
 
 
@@ -345,6 +367,10 @@ func _layout_phase2_map(world_seed: int) -> void:
 	# --- Tier 2 vehicles: roads and lots (more streets → a few more cars) ---
 	_place_on_roads(2, TIER2_RADIUS, 36)
 
+	# Light poles along sidewalks; people wander parks / roadside.
+	_place_lamps(28)
+	_place_people(30)
+
 	# --- Tier 3 small buildings (16): edges with path gaps ---
 	_place_edge_landmarks(3, TIER3_RADIUS, [
 		Vector2(-68, -20), Vector2(-68, 20),
@@ -386,7 +412,7 @@ func _scatter_props(
 ) -> void:
 	var placed := 0
 	var attempts := 0
-	while placed < count and attempts < count * 8:
+	while placed < count and attempts < count * 24:
 		attempts += 1
 		var ang: float = _rng.randf() * TAU
 		var dist: float = sqrt(_rng.randf()) * spread
@@ -396,19 +422,29 @@ func _scatter_props(
 			continue
 		x = clampf(x, -map_half + radius, map_half - radius)
 		y = clampf(y, -map_half + radius, map_half - radius)
+		if not _can_place_prop(x, y, radius):
+			continue
 		objects.append(make_prop(_alloc_id(), x, y, tier, radius))
 		placed += 1
 
 
 func _scatter_along_line(tier: int, radius: float, count: int, a: Vector2, b: Vector2) -> void:
 	for i in count:
-		var t: float = (float(i) + 0.5) / float(count)
-		var p: Vector2 = a.lerp(b, t)
-		p.x += _rng.randf_range(-1.5, 1.5)
-		p.y += _rng.randf_range(-1.5, 1.5)
-		p.x = clampf(p.x, -map_half + radius, map_half - radius)
-		p.y = clampf(p.y, -map_half + radius, map_half - radius)
-		objects.append(make_prop(_alloc_id(), p.x, p.y, tier, radius))
+		var placed := false
+		for _try in 10:
+			var t: float = (float(i) + 0.5) / float(count)
+			var p: Vector2 = a.lerp(b, t)
+			p.x += _rng.randf_range(-1.5, 1.5)
+			p.y += _rng.randf_range(-1.5, 1.5)
+			p.x = clampf(p.x, -map_half + radius, map_half - radius)
+			p.y = clampf(p.y, -map_half + radius, map_half - radius)
+			if not _can_place_prop(p.x, p.y, radius):
+				continue
+			objects.append(make_prop(_alloc_id(), p.x, p.y, tier, radius))
+			placed = true
+			break
+		if not placed:
+			pass
 
 
 func _place_on_roads(tier: int, radius: float, count: int) -> void:
@@ -419,41 +455,63 @@ func _place_on_roads(tier: int, radius: float, count: int) -> void:
 		var road_i: int = i % roads.size()
 		var road: Rect2 = roads[road_i]
 		if tier == 2:
-			objects.append(_make_vehicle_on_road(road_i, road))
+			var vehicle: Dictionary = _make_vehicle_on_road(road_i, road)
+			if not vehicle.is_empty():
+				objects.append(vehicle)
 			continue
-		var x: float = _rng.randf_range(road.position.x + radius, road.position.x + road.size.x - radius)
-		var y: float = _rng.randf_range(road.position.y + radius, road.position.y + road.size.y - radius)
-		x = clampf(x, -map_half + radius, map_half - radius)
-		y = clampf(y, -map_half + radius, map_half - radius)
-		objects.append(make_prop(_alloc_id(), x, y, tier, radius))
+		var placed := false
+		for _try in 12:
+			var x: float = _rng.randf_range(road.position.x + radius, road.position.x + road.size.x - radius)
+			var y: float = _rng.randf_range(road.position.y + radius, road.position.y + road.size.y - radius)
+			x = clampf(x, -map_half + radius, map_half - radius)
+			y = clampf(y, -map_half + radius, map_half - radius)
+			if not _can_place_prop(x, y, radius):
+				continue
+			objects.append(make_prop(_alloc_id(), x, y, tier, radius))
+			placed = true
+			break
+		if not placed:
+			pass
 
 
 func _make_vehicle_on_road(road_i: int, road: Rect2) -> Dictionary:
 	var kind: int = _rng.randi_range(0, 2)
-	var r: float = TIER2_RADIUS
+	## Wide size spread so the street reads as mixed traffic.
+	var r: float = TIER2_RADIUS * _rng.randf_range(0.72, 1.12)
 	if kind == VEHICLE_VAN:
-		r *= 1.18
+		r *= _rng.randf_range(1.15, 1.4)
 	elif kind == VEHICLE_TRUCK:
-		r *= 1.38
-	var horizontal: bool = road.size.x >= road.size.y
-	var margin: float = r * 1.3
-	var x: float
-	var y: float
-	if horizontal:
-		x = _rng.randf_range(road.position.x + margin, road.position.x + road.size.x - margin)
-		y = road.position.y + road.size.y * 0.5
+		r *= _rng.randf_range(1.35, 1.7)
 	else:
-		x = road.position.x + road.size.x * 0.5
-		y = _rng.randf_range(road.position.y + margin, road.position.y + road.size.y - margin)
-	x = clampf(x, -map_half + r, map_half - r)
-	y = clampf(y, -map_half + r, map_half - r)
-	var prop: Dictionary = make_prop(_alloc_id(), x, y, 2, r)
-	_configure_vehicle(prop, kind, road_i, horizontal)
-	return prop
+		r *= _rng.randf_range(0.85, 1.15)
+	var horizontal: bool = road.size.x >= road.size.y
+	var margin: float = r * 1.4
+	for _try in 16:
+		var x: float
+		var y: float
+		if horizontal:
+			if road.size.x <= margin * 2.0:
+				return {}
+			x = _rng.randf_range(road.position.x + margin, road.position.x + road.size.x - margin)
+			y = road.position.y + road.size.y * 0.5
+		else:
+			if road.size.y <= margin * 2.0:
+				return {}
+			x = road.position.x + road.size.x * 0.5
+			y = _rng.randf_range(road.position.y + margin, road.position.y + road.size.y - margin)
+		x = clampf(x, -map_half + r, map_half - r)
+		y = clampf(y, -map_half + r, map_half - r)
+		if not _can_place_prop(x, y, r):
+			continue
+		var prop: Dictionary = make_prop(_alloc_id(), x, y, 2, r)
+		_configure_vehicle(prop, kind, road_i, horizontal)
+		return prop
+	return {}
 
 
 func _configure_vehicle(prop: Dictionary, kind: int, road_i: int, horizontal: bool) -> void:
 	prop["vehicle"] = kind
+	prop["role"] = ROLE_PROP
 	prop["body_color"] = VEHICLE_COLORS[_rng.randi_range(0, VEHICLE_COLORS.size() - 1)]
 	prop["road_i"] = road_i
 	var speed: float = _rng.randf_range(VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX)
@@ -466,12 +524,123 @@ func _configure_vehicle(prop: Dictionary, kind: int, road_i: int, horizontal: bo
 		prop["vy"] = speed * sign
 
 
+func _place_lamps(count: int) -> void:
+	## Tall thin poles along sidewalks (offset from road centerlines).
+	if roads.is_empty():
+		return
+	var placed := 0
+	var attempts := 0
+	while placed < count and attempts < count * 20:
+		attempts += 1
+		var road: Rect2 = roads[_rng.randi_range(0, roads.size() - 1)]
+		var horizontal: bool = road.size.x >= road.size.y
+		var side: float = -1.0 if _rng.randf() < 0.5 else 1.0
+		var offset: float = road.size.y * 0.5 + 1.6 if horizontal else road.size.x * 0.5 + 1.6
+		var x: float
+		var y: float
+		if horizontal:
+			x = _rng.randf_range(road.position.x + 2.0, road.position.x + road.size.x - 2.0)
+			y = road.position.y + road.size.y * 0.5 + side * offset
+		else:
+			x = road.position.x + road.size.x * 0.5 + side * offset
+			y = _rng.randf_range(road.position.y + 2.0, road.position.y + road.size.y - 2.0)
+		x = clampf(x, -map_half + LAMP_RADIUS, map_half - LAMP_RADIUS)
+		y = clampf(y, -map_half + LAMP_RADIUS, map_half - LAMP_RADIUS)
+		if not _can_place_prop(x, y, LAMP_RADIUS):
+			continue
+		var lamp: Dictionary = make_prop(_alloc_id(), x, y, 1, LAMP_RADIUS)
+		lamp["role"] = ROLE_LAMP
+		objects.append(lamp)
+		placed += 1
+
+
+func _place_people(count: int) -> void:
+	var placed := 0
+	var attempts := 0
+	while placed < count and attempts < count * 24:
+		attempts += 1
+		var x: float
+		var y: float
+		if not parks.is_empty() and _rng.randf() < 0.45:
+			var park: Dictionary = parks[_rng.randi_range(0, parks.size() - 1)]
+			var c: Vector2 = park["center"] as Vector2
+			var pr: float = float(park["radius"]) * 0.85
+			var ang: float = _rng.randf() * TAU
+			var dist: float = sqrt(_rng.randf()) * pr
+			x = c.x + cos(ang) * dist
+			y = c.y + sin(ang) * dist
+		elif not roads.is_empty():
+			var road: Rect2 = roads[_rng.randi_range(0, roads.size() - 1)]
+			var horizontal: bool = road.size.x >= road.size.y
+			var side: float = -1.0 if _rng.randf() < 0.5 else 1.0
+			var offset: float = (road.size.y if horizontal else road.size.x) * 0.5 + _rng.randf_range(2.0, 4.5)
+			if horizontal:
+				x = _rng.randf_range(road.position.x + 2.0, road.position.x + road.size.x - 2.0)
+				y = road.position.y + road.size.y * 0.5 + side * offset
+			else:
+				x = road.position.x + road.size.x * 0.5 + side * offset
+				y = _rng.randf_range(road.position.y + 2.0, road.position.y + road.size.y - 2.0)
+		else:
+			x = _rng.randf_range(-map_half * 0.6, map_half * 0.6)
+			y = _rng.randf_range(-map_half * 0.6, map_half * 0.6)
+		x = clampf(x, -map_half + PERSON_RADIUS, map_half - PERSON_RADIUS)
+		y = clampf(y, -map_half + PERSON_RADIUS, map_half - PERSON_RADIUS)
+		if not _can_place_prop(x, y, PERSON_RADIUS):
+			continue
+		var person: Dictionary = make_prop(_alloc_id(), x, y, 1, PERSON_RADIUS)
+		person["role"] = ROLE_PERSON
+		person["body_color"] = PERSON_COLORS[_rng.randi_range(0, PERSON_COLORS.size() - 1)]
+		_retarget_person(person)
+		objects.append(person)
+		placed += 1
+
+
+func _retarget_person(prop: Dictionary) -> void:
+	var speed: float = _rng.randf_range(PERSON_SPEED_MIN, PERSON_SPEED_MAX)
+	var ang: float = _rng.randf() * TAU
+	prop["vx"] = cos(ang) * speed
+	prop["vy"] = sin(ang) * speed
+	prop["wander_t"] = _rng.randf_range(1.2, 3.5)
+
+
 func _place_edge_landmarks(tier: int, radius: float, positions: Array) -> void:
 	for pos_v in positions:
 		var pos: Vector2 = pos_v
 		pos.x = clampf(pos.x, -map_half + radius, map_half - radius)
 		pos.y = clampf(pos.y, -map_half + radius, map_half - radius)
+		if not _can_place_prop(pos.x, pos.y, radius):
+			## Nudge outward a bit if blocked.
+			var found := false
+			for _try in 8:
+				var n := pos + Vector2(_rng.randf_range(-4, 4), _rng.randf_range(-4, 4))
+				n.x = clampf(n.x, -map_half + radius, map_half - radius)
+				n.y = clampf(n.y, -map_half + radius, map_half - radius)
+				if _can_place_prop(n.x, n.y, radius):
+					pos = n
+					found = true
+					break
+			if not found:
+				continue
 		objects.append(make_prop(_alloc_id(), pos.x, pos.y, tier, radius))
+
+
+func _can_place_prop(x: float, y: float, radius: float, ignore_id: int = -1) -> bool:
+	var p := Vector2(x, y)
+	for other_v in objects:
+		var other: Dictionary = other_v
+		if not bool(other["alive"]):
+			continue
+		if int(other["id"]) == ignore_id:
+			continue
+		var min_d: float = radius + float(other["radius"]) + SPAWN_GAP
+		if p.distance_to(Vector2(float(other["x"]), float(other["y"]))) < min_d:
+			return false
+	return true
+
+
+static func is_mover_prop(prop: Dictionary) -> bool:
+	var role: int = int(prop.get("role", ROLE_PROP))
+	return int(prop.get("tier", 0)) == 2 or role == ROLE_PERSON
 
 
 func _clear_spawn_pads() -> void:
@@ -622,6 +791,10 @@ static func prop_tip_dims(prop: Dictionary) -> Vector2:
 		0:
 			return Vector2(r * 1.2, r * 0.6)
 		1:
+			if int(prop.get("role", ROLE_PROP)) == ROLE_LAMP:
+				return Vector2(r * 0.6, r * 8.0) ## thin tall pole
+			if int(prop.get("role", ROLE_PROP)) == ROLE_PERSON:
+				return Vector2(r * 0.9, r * 2.4)
 			return Vector2(r * 1.4, r * 1.6)
 		2:
 			var kind: int = int(prop.get("vehicle", VEHICLE_SEDAN))
@@ -731,13 +904,16 @@ func _update_props(dt: float, events: Array) -> void:
 		var py: float = float(prop["y"])
 		var pr: float = float(prop["radius"])
 		_update_prop_tip(prop, alive, dt)
-		# Cars/vans/trucks cruise roads until they tip or fall; everything else stays put.
-		if (
-			int(prop["tier"]) == 2
-			and not bool(prop.get("fallen", false))
+		var upright: bool = (
+			not bool(prop.get("fallen", false))
 			and float(prop.get("tip_angle", 0.0)) < 0.05
-		):
+		)
+		if upright and int(prop["tier"]) == 2:
 			_drive_vehicle(prop, dt)
+			px = float(prop["x"])
+			py = float(prop["y"])
+		elif upright and int(prop.get("role", ROLE_PROP)) == ROLE_PERSON:
+			_drive_person(prop, dt)
 			px = float(prop["x"])
 			py = float(prop["y"])
 		else:
@@ -816,10 +992,146 @@ func _update_props(dt: float, events: Array) -> void:
 				"fallen": bool(prop.get("fallen", false)),
 				"tip_dx": float(prop.get("tip_dx", 1.0)),
 				"tip_dy": float(prop.get("tip_dy", 0.0)),
+				"role": int(prop.get("role", ROLE_PROP)),
+				"vehicle": int(prop.get("vehicle", VEHICLE_SEDAN)),
+				"body_color": prop.get("body_color", VEHICLE_COLORS[0]),
 			})
 
 	for dead in to_remove:
 		objects.erase(dead)
+
+	_resolve_mover_collisions()
+
+
+func _drive_person(prop: Dictionary, dt: float) -> void:
+	prop["wander_t"] = float(prop.get("wander_t", 0.0)) - dt
+	if float(prop["wander_t"]) <= 0.0:
+		_retarget_person(prop)
+	var r: float = float(prop["radius"])
+	var x: float = float(prop["x"]) + float(prop["vx"]) * dt
+	var y: float = float(prop["y"]) + float(prop["vy"]) * dt
+	var min_c: float = -map_half + r
+	var max_c: float = map_half - r
+	if x < min_c or x > max_c:
+		prop["vx"] = -float(prop["vx"])
+		x = clampf(x, min_c, max_c)
+	if y < min_c or y > max_c:
+		prop["vy"] = -float(prop["vy"])
+		y = clampf(y, min_c, max_c)
+	prop["x"] = x
+	prop["y"] = y
+
+
+func _resolve_mover_collisions() -> void:
+	## Keep moving cars/people from stacking; bounce soft off static props too.
+	var movers: Array = []
+	for prop_v in objects:
+		var prop: Dictionary = prop_v
+		if not bool(prop["alive"]):
+			continue
+		if bool(prop.get("fallen", false)) or float(prop.get("tip_angle", 0.0)) >= 0.05:
+			continue
+		if is_mover_prop(prop):
+			movers.append(prop)
+	for i in movers.size():
+		var a: Dictionary = movers[i]
+		var ax: float = float(a["x"])
+		var ay: float = float(a["y"])
+		var ar: float = float(a["radius"])
+		# Movers vs movers.
+		for j in range(i + 1, movers.size()):
+			var b: Dictionary = movers[j]
+			var bx: float = float(b["x"])
+			var by: float = float(b["y"])
+			var br: float = float(b["radius"])
+			var dx: float = bx - ax
+			var dy: float = by - ay
+			var dist: float = sqrt(dx * dx + dy * dy)
+			var min_d: float = ar + br + 0.05
+			if dist >= min_d or dist < 0.0001:
+				continue
+			var nx: float = dx / dist
+			var ny: float = dy / dist
+			var push: float = (min_d - dist) * 0.5
+			a["x"] = ax - nx * push
+			a["y"] = ay - ny * push
+			b["x"] = bx + nx * push
+			b["y"] = by + ny * push
+			ax = float(a["x"])
+			ay = float(a["y"])
+			# Flip velocity components along the contact for cars on rails / walkers.
+			var avx: float = float(a["vx"])
+			var avy: float = float(a["vy"])
+			var bvx: float = float(b["vx"])
+			var bvy: float = float(b["vy"])
+			var a_along: float = avx * nx + avy * ny
+			var b_along: float = bvx * nx + bvy * ny
+			if a_along > 0.0:
+				a["vx"] = avx - nx * a_along * 2.0
+				a["vy"] = avy - ny * a_along * 2.0
+			if b_along < 0.0:
+				b["vx"] = bvx - nx * b_along * 2.0
+				b["vy"] = bvy - ny * b_along * 2.0
+			# Road cars: keep axis-aligned after bounce.
+			if int(a["tier"]) == 2:
+				_realign_vehicle_velocity(a)
+			if int(b["tier"]) == 2:
+				_realign_vehicle_velocity(b)
+		# Movers vs solid statics (buildings / lamps / street furniture).
+		for other_v in objects:
+			var other: Dictionary = other_v
+			if not bool(other["alive"]) or int(other["id"]) == int(a["id"]):
+				continue
+			if is_mover_prop(other):
+				continue
+			var ox: float = float(other["x"])
+			var oy: float = float(other["y"])
+			var orad: float = float(other["radius"])
+			# Buildings use a wider block footprint.
+			if int(other["tier"]) >= 3:
+				orad *= 1.35
+			var dx2: float = ax - ox
+			var dy2: float = ay - oy
+			var dist2: float = sqrt(dx2 * dx2 + dy2 * dy2)
+			var min2: float = ar + orad + 0.05
+			if dist2 >= min2 or dist2 < 0.0001:
+				continue
+			var nx2: float = dx2 / dist2
+			var ny2: float = dy2 / dist2
+			var push2: float = min2 - dist2
+			a["x"] = ax + nx2 * push2
+			a["y"] = ay + ny2 * push2
+			ax = float(a["x"])
+			ay = float(a["y"])
+			var along: float = float(a["vx"]) * nx2 + float(a["vy"]) * ny2
+			if along < 0.0:
+				a["vx"] = float(a["vx"]) - nx2 * along * 2.0
+				a["vy"] = float(a["vy"]) - ny2 * along * 2.0
+			if int(a["tier"]) == 2:
+				_realign_vehicle_velocity(a)
+			elif int(a.get("role", ROLE_PROP)) == ROLE_PERSON:
+				_retarget_person(a)
+
+
+func _realign_vehicle_velocity(prop: Dictionary) -> void:
+	## After a collision, restore axis-aligned road motion at a varied cruise speed.
+	var road_i: int = int(prop.get("road_i", -1))
+	var horizontal := true
+	if road_i >= 0 and road_i < roads.size():
+		var road: Rect2 = roads[road_i]
+		horizontal = road.size.x >= road.size.y
+	var speed: float = maxf(absf(float(prop["vx"])), absf(float(prop["vy"])))
+	if speed < VEHICLE_SPEED_MIN * 0.5:
+		speed = _rng.randf_range(VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX)
+	speed = clampf(speed, VEHICLE_SPEED_MIN, VEHICLE_SPEED_MAX)
+	if horizontal:
+		var sign_x: float = -1.0 if float(prop["vx"]) < 0.0 else 1.0
+		prop["vx"] = speed * sign_x
+		prop["vy"] = 0.0
+	else:
+		var sign_y: float = -1.0 if float(prop["vy"]) < 0.0 else 1.0
+		prop["vx"] = 0.0
+		prop["vy"] = speed * sign_y
 
 
 func _drive_vehicle(prop: Dictionary, dt: float) -> void:
@@ -1021,9 +1333,13 @@ func _process_prop_respawns() -> void:
 		var radius: float = float(TIER_RADIUS[clampi(tier, 0, TIER_RADIUS.size() - 1)])
 		if tier == 2 and not roads.is_empty():
 			var road_i: int = _rng.randi_range(0, roads.size() - 1)
-			objects.append(_make_vehicle_on_road(road_i, roads[road_i]))
+			var vehicle: Dictionary = _make_vehicle_on_road(road_i, roads[road_i])
+			if not vehicle.is_empty():
+				objects.append(vehicle)
 			continue
 		var pos := _spawn_prop_away_from_holes(Vector2(float(item["x"]), float(item["y"])), radius)
+		if not _can_place_prop(pos.x, pos.y, radius):
+			continue
 		objects.append(make_prop(_alloc_id(), pos.x, pos.y, tier, radius))
 	_pending_prop_spawns = keep
 

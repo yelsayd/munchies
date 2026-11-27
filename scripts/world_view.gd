@@ -62,12 +62,17 @@ func _draw() -> void:
 		var pos := Vector2(float(prop["x"]), float(prop["y"])) * PIXELS_PER_METER
 		var r: float = float(prop["radius"]) * PIXELS_PER_METER
 		var tier: int = int(prop["tier"])
+		var role: int = int(prop.get("role", MunchiesSim.ROLE_PROP))
 		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
-		if tier == 2 and prop.has("body_color"):
+		if (tier == 2 or role == MunchiesSim.ROLE_PERSON) and prop.has("body_color"):
 			col = prop["body_color"] as Color
 		var facing: float = _prop_facing(prop, sim)
 		if bool(prop.get("fallen", false)) or float(prop.get("tip_angle", 0.0)) > 0.05:
 			_draw_prop_tipped(prop, pos, r, col, tier)
+		elif role == MunchiesSim.ROLE_LAMP:
+			_draw_lamp(pos, r)
+		elif role == MunchiesSim.ROLE_PERSON:
+			_draw_person(pos, r, col, facing)
 		else:
 			_draw_tier_shape(tier, pos, r, col, int(prop["id"]), facing, int(prop.get("vehicle", 0)))
 		# Contested / claimed: only the claiming hole owns the prop — ring in that hole's color.
@@ -278,11 +283,29 @@ func _draw_spawn_pads() -> void:
 		draw_arc(pad, 2.2 * PIXELS_PER_METER, 0.0, TAU, 32, Color(0.55, 0.65, 0.58, 0.45), 2.0, true)
 
 
+func _draw_lamp(pos: Vector2, r: float) -> void:
+	## Top-down: small base + thin mast marker.
+	var pole := Color(0.22, 0.22, 0.24)
+	var head := Color(0.92, 0.88, 0.65, 0.9)
+	draw_circle(pos, r * 1.1, pole)
+	draw_circle(pos, r * 0.45, head)
+	draw_arc(pos, r * 2.2, 0.0, TAU, 20, Color(0.9, 0.85, 0.5, 0.25), 1.5, true)
+
+
+func _draw_person(pos: Vector2, r: float, col: Color, facing: float) -> void:
+	var axis := Vector2(cos(facing), sin(facing))
+	if axis.length_squared() < 0.0001:
+		axis = Vector2.RIGHT
+	draw_circle(pos, r * 0.85, col)
+	draw_circle(pos + Vector2(0, -r * 0.85), r * 0.45, Color(0.86, 0.70, 0.58))
+	draw_circle(pos + axis * (r * 0.55), r * 0.2, col.lightened(0.2))
+
+
 func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
-	## Prefer drive velocity so moving cars face travel direction.
+	## Prefer drive/walk velocity so movers face travel direction.
 	var vx: float = float(prop.get("vx", 0.0))
 	var vy: float = float(prop.get("vy", 0.0))
-	if vx * vx + vy * vy > 0.25:
+	if vx * vx + vy * vy > 0.04:
 		return atan2(vy, vx)
 	var px: float = float(prop["x"])
 	var py: float = float(prop["y"])
