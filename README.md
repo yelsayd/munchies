@@ -24,7 +24,7 @@ Or open the folder in the Godot editor and press Play (`F5`).
 
 ### 2D / 3D view toggle
 
-Default is **3D** (single pane following You). Sim `step`, claims, and modes stay 2D (`x, y, radius` authority). Props have **no suction pull** — the hole must **fully cover** a prop (whole footprint inside the hole disc) to swallow it; the 3D view drops the mesh briefly into the pit. **Buildings / blocks** tip when a hole crosses their center; if not covered they can fall on their side and then need the fallen footprint covered to swallow.
+Default is **3D** (single pane following You). Sim `step`, claims, and modes stay 2D (`x, y, radius` authority). Props have **no suction pull**. Upright props need full disc cover to swallow; once a hole crosses the center they **tip**, and after a short lean (or if fallen) CoG-in-hole + size gate finishes the eat. The 3D view drops the mesh straight down into the pit.
 
 | How | Effect |
 | --- | --- |

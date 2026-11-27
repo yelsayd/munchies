@@ -26,13 +26,18 @@ const PROP_CONSUME_MULT := 1.0 ## unused — swallow uses full coverage
 const PROP_PULL_ACCEL := 0.0 ## no gravity / no suction pull on props
 const PROP_PULL_MAX_SPEED := 0.0
 
-## Buildings / blocks (tier ≥ 3): tip when a hole contains the CoG; fall if not covered.
-const BUILDING_TIP_MIN_TIER := 3
-const BUILDING_TIP_RATE := 2.4 ## rad/s while CoG is inside a hole
-const BUILDING_TIP_RECOVER := 1.6 ## rad/s spring-back when CoG is free
-const BUILDING_FALL_ANGLE := PI * 0.5 ## 90° → fallen on its side
+## All props tip when a hole contains the CoG; fall on their side if not covered.
+const PROP_TIP_RATE := 2.4 ## rad/s while CoG is inside a hole
+const PROP_TIP_RECOVER := 1.6 ## rad/s spring-back when CoG is free
+const PROP_FALL_ANGLE := PI * 0.5 ## 90° → fallen on its side
 ## After this lean, cover = CoG-in-hole (rim tips can never satisfy full-disc cover).
-const BUILDING_TIP_COMMIT := PI * 0.22
+const PROP_TIP_COMMIT := PI * 0.22
+## Aliases kept for older call sites / comments.
+const BUILDING_TIP_MIN_TIER := 3
+const BUILDING_TIP_RATE := PROP_TIP_RATE
+const BUILDING_TIP_RECOVER := PROP_TIP_RECOVER
+const BUILDING_FALL_ANGLE := PROP_FALL_ANGLE
+const BUILDING_TIP_COMMIT := PROP_TIP_COMMIT
 ## Footprint multipliers — keep in sync with world_view_3d mesh sizes.
 const BUILDING_WIDTH_MULT := 1.6
 const BUILDING_HEIGHT_MULT := 2.2
@@ -129,7 +134,7 @@ static func make_prop(id: int, x: float, y: float, tier: int, radius: float) -> 
 		"tier": tier,
 		"claimed_by": -1,
 		"alive": true,
-		## Buildings (tier ≥ 3): tip toward hole; fallen swaps cover footprint.
+		## Tip toward hole when CoG is inside; may fall on side if not swallowed.
 		"tip_angle": 0.0,
 		"fallen": false,
 		"tip_dx": 1.0,
@@ -482,18 +487,34 @@ static func prop_fully_covered(dist: float, prop_radius: float, hole_radius: flo
 
 
 static func building_dims(prop: Dictionary) -> Vector2:
-	## Returns (width, height) in meters matching the 3D box mesh.
+	## Returns (width, height) in meters matching the 3D building/block mesh.
 	var r: float = float(prop["radius"])
 	if int(prop["tier"]) >= 4:
 		return Vector2(r * BLOCK_WIDTH_MULT, r * BLOCK_HEIGHT_MULT)
 	return Vector2(r * BUILDING_WIDTH_MULT, r * BUILDING_HEIGHT_MULT)
 
 
+## (hinge footprint width, mesh height) for tip pivot — match world_view_3d meshes.
+static func prop_tip_dims(prop: Dictionary) -> Vector2:
+	var r: float = float(prop["radius"])
+	match int(prop.get("tier", 0)):
+		0:
+			return Vector2(r * 1.2, r * 0.6)
+		1:
+			return Vector2(r * 1.4, r * 1.6)
+		2:
+			return Vector2(r * 2.4, r * 0.9) ## car body length × height
+		3:
+			return Vector2(r * BUILDING_WIDTH_MULT, r * BUILDING_HEIGHT_MULT)
+		_:
+			return Vector2(r * BLOCK_WIDTH_MULT, r * BLOCK_HEIGHT_MULT)
+
+
 static func is_building_prop(prop: Dictionary) -> bool:
 	return int(prop.get("tier", 0)) >= BUILDING_TIP_MIN_TIER
 
 
-## Steer / seek point for a prop (buildings: the CoG — tip pulls mass into the hole).
+## Steer / seek point for a prop (CoG).
 static func prop_cover_center(prop: Dictionary) -> Vector2:
 	return Vector2(float(prop["x"]), float(prop["y"]))
 
@@ -503,22 +524,21 @@ static func prop_cover_radius(prop: Dictionary) -> float:
 
 
 ## True when this hole is big enough to finish the prop (size gate).
-## Buildings only need the gate: once CoG is inside and tip commits, they swallow.
+## Once CoG is inside and tip commits, any prop swallows the same way.
 static func hole_can_cover_prop(hole_radius: float, prop: Dictionary) -> bool:
-	if float(prop["radius"]) > hole_radius * PROP_EAT_RATIO:
-		return false
-	if is_building_prop(prop):
-		return true
-	return hole_radius >= prop_cover_radius(prop)
+	return float(prop["radius"]) <= hole_radius * PROP_EAT_RATIO
+
+
+static func prop_tip_committed(prop: Dictionary) -> bool:
+	return bool(prop.get("fallen", false)) \
+		or float(prop.get("tip_angle", 0.0)) >= PROP_TIP_COMMIT
 
 
 static func building_tip_committed(prop: Dictionary) -> bool:
-	return bool(prop.get("fallen", false)) \
-		or float(prop.get("tip_angle", 0.0)) >= BUILDING_TIP_COMMIT
+	return prop_tip_committed(prop)
 
 
-## Cover test. Litter/cars/upright buildings: full disc.
-## Buildings mid-tip or fallen: CoG inside the hole (rim tips cannot satisfy disc cover).
+## Cover test. Upright: full disc. Tip-committed / fallen: CoG inside the hole.
 static func hole_covers_prop(hole: Dictionary, prop: Dictionary) -> bool:
 	var hr: float = float(hole["radius"])
 	var hx: float = float(hole["x"])
@@ -526,21 +546,19 @@ static func hole_covers_prop(hole: Dictionary, prop: Dictionary) -> bool:
 	var px: float = float(prop["x"])
 	var py: float = float(prop["y"])
 	var cdist: float = Vector2(hx - px, hy - py).length()
-	if is_building_prop(prop) and building_tip_committed(prop):
+	if prop_tip_committed(prop):
 		return cdist <= hr
 	return prop_fully_covered(cdist, float(prop["radius"]), hr)
 
 
-func _update_building_tip(prop: Dictionary, alive: Array, dt: float) -> void:
-	if not is_building_prop(prop):
-		return
+func _update_prop_tip(prop: Dictionary, alive: Array, dt: float) -> void:
 	if bool(prop.get("fallen", false)):
-		prop["tip_angle"] = BUILDING_FALL_ANGLE
+		prop["tip_angle"] = PROP_FALL_ANGLE
 		return
 
 	var px: float = float(prop["x"])
 	var py: float = float(prop["y"])
-	# Closest hole whose disc contains the building CoG (center) drives the tip.
+	# Closest hole whose disc contains the CoG drives the tip.
 	var tip_hole: Dictionary = {}
 	var tip_dist: float = INF
 	for hole_v in alive:
@@ -560,18 +578,18 @@ func _update_building_tip(prop: Dictionary, alive: Array, dt: float) -> void:
 			dir = dir.normalized()
 			prop["tip_dx"] = dir.x
 			prop["tip_dy"] = dir.y
-		angle = minf(BUILDING_FALL_ANGLE, angle + BUILDING_TIP_RATE * dt)
-		if angle >= BUILDING_FALL_ANGLE - 0.001:
+		angle = minf(PROP_FALL_ANGLE, angle + PROP_TIP_RATE * dt)
+		if angle >= PROP_FALL_ANGLE - 0.001:
 			prop["fallen"] = true
-			angle = BUILDING_FALL_ANGLE
+			angle = PROP_FALL_ANGLE
 	else:
-		angle = maxf(0.0, angle - BUILDING_TIP_RECOVER * dt)
+		angle = maxf(0.0, angle - PROP_TIP_RECOVER * dt)
 	prop["tip_angle"] = angle
 
 
 func _update_props(dt: float, events: Array) -> void:
-	## No gravity: props do not get pulled. The hole must fully cover them to swallow.
-	## Buildings tip when a hole crosses their CoG; fall on their side if not covered.
+	## No gravity: props do not get pulled. Cover (or tip-commit + CoG) to swallow.
+	## Every prop tips when a hole crosses its CoG; may fall on its side if not covered.
 	var alive: Array = _alive_holes()
 	if alive.is_empty():
 		return
@@ -589,7 +607,7 @@ func _update_props(dt: float, events: Array) -> void:
 		# Static world props — no suction velocity.
 		prop["vx"] = 0.0
 		prop["vy"] = 0.0
-		_update_building_tip(prop, alive, dt)
+		_update_prop_tip(prop, alive, dt)
 
 		# Closest qualifying hole claims (ring UI); others ignore a claimed prop.
 		var best_hole: Dictionary = {}

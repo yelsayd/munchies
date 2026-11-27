@@ -64,8 +64,8 @@ func _draw() -> void:
 		var tier: int = int(prop["tier"])
 		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
 		var facing: float = _prop_facing(prop, sim)
-		if tier >= 3 and (bool(prop.get("fallen", false)) or float(prop.get("tip_angle", 0.0)) > 0.05):
-			_draw_building_tipped(prop, pos, r, col, tier >= 4)
+		if bool(prop.get("fallen", false)) or float(prop.get("tip_angle", 0.0)) > 0.05:
+			_draw_prop_tipped(prop, pos, r, col, tier)
 		else:
 			_draw_tier_shape(tier, pos, r, col, int(prop["id"]), facing)
 		# Contested / claimed: only the claiming hole owns the prop — ring in that hole's color.
@@ -93,8 +93,8 @@ func _draw() -> void:
 		var col: Color = TIER_COLORS.get(int(t["tier"]), Color.WHITE) as Color
 		col.a = alpha
 		var tier: int = int(t["tier"])
-		if tier >= 3 and (bool(t.get("fallen", false)) or float(t.get("tip_angle", 0.0)) > 0.05):
-			_draw_building_tipped(t, pos, r, col, tier >= 4)
+		if bool(t.get("fallen", false)) or float(t.get("tip_angle", 0.0)) > 0.05:
+			_draw_prop_tipped(t, pos, r, col, tier)
 		else:
 			_draw_tier_shape(tier, pos, r, col, 0, 0.0)
 
@@ -421,8 +421,8 @@ func _draw_building(pos: Vector2, r: float, col: Color, is_block: bool) -> void:
 		draw_rect(Rect2(pos - Vector2(court, court) * 0.5, Vector2(court, court)), COL_PARK_DEEP, false, 1.5)
 
 
-func _draw_building_tipped(prop: Dictionary, pos: Vector2, r: float, col: Color, is_block: bool) -> void:
-	## Top-down lean / fallen slab oriented along tip_dir (sim meters → pixels already in pos/r).
+func _draw_prop_tipped(prop: Dictionary, pos: Vector2, r: float, col: Color, tier: int) -> void:
+	## Top-down lean / fallen slab oriented along tip_dir (all tiers).
 	var tip_angle: float = float(prop.get("tip_angle", 0.0))
 	if bool(prop.get("fallen", false)):
 		tip_angle = PI * 0.5
@@ -433,19 +433,17 @@ func _draw_building_tipped(prop: Dictionary, pos: Vector2, r: float, col: Color,
 	else:
 		tip = tip.normalized()
 	var perp := Vector2(-tip.y, tip.x)
-	var upright: float = r * (1.9 if is_block else 1.7)
-	var height_m: float = r * (MunchiesSim.BLOCK_HEIGHT_MULT if is_block else MunchiesSim.BUILDING_HEIGHT_MULT)
-	var height_px: float = height_m * PIXELS_PER_METER
-	var width_m: float = r * (MunchiesSim.BLOCK_WIDTH_MULT if is_block else MunchiesSim.BUILDING_WIDTH_MULT)
-	var width_px: float = width_m * PIXELS_PER_METER
-	# Interpolate footprint: square → elongated slab along tip.
+	var dims: Vector2 = MunchiesSim.prop_tip_dims(prop)
+	var upright: float = r * (1.9 if tier >= 4 else (1.7 if tier >= 3 else 1.4))
+	var height_px: float = dims.y * PIXELS_PER_METER
+	var width_px: float = dims.x * PIXELS_PER_METER
+	# Interpolate footprint: compact → elongated slab along tip.
 	var length_px: float = lerpf(upright, height_px, t)
 	var width_draw: float = lerpf(upright, width_px, t)
 	var pts := _oriented_rect(pos, length_px, width_draw, tip, perp)
 	_draw_poly_safe(pts, col.darkened(0.05))
 	if pts.size() >= 2:
 		draw_polyline(pts + PackedVector2Array([pts[0]]), col.darkened(0.35), 2.0, true)
-	# Roof / side plate accent
 	var inset_len: float = length_px * 0.72
 	var inset_w: float = width_draw * 0.55
 	_draw_poly_safe(

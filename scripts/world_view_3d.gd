@@ -264,13 +264,9 @@ func _sync_tweens() -> void:
 		node.material_override = _mat(col, true)
 		_tweens_root.add_child(node)
 		var drop: float = float(tw.get("drop", 0.0))
-		# Freeze XZ; fall straight down past the rim (no slide toward hole center).
-		if tier >= 3:
-			_place_building_tipped(node, fake, _prop_height(tier, r * scale_v))
-			node.position.y -= drop
-		else:
-			var base_h: float = _prop_height(tier, r) * 0.5 * scale_v
-			node.position = Vector3(float(tw["x"]), base_h - drop, float(tw["y"]))
+		# Freeze XZ; tip pose + fall straight down (no slide toward hole center).
+		_place_prop_tipped(node, fake, _prop_height(tier, r * scale_v))
+		node.position.y -= drop
 		_tween_nodes.append(node)
 
 
@@ -333,23 +329,23 @@ func _place_prop(node: MeshInstance3D, prop: Dictionary, sim: MunchiesSim) -> vo
 	var r: float = float(prop["radius"])
 	var tier: int = int(prop["tier"])
 	var h: float = _prop_height(tier, r)
-	var px: float = float(prop["x"])
-	var pz: float = float(prop["y"])
-	if tier >= 3:
-		_place_building_tipped(node, prop, h)
+	var tip_angle: float = float(prop.get("tip_angle", 0.0))
+	if bool(prop.get("fallen", false)) or tip_angle > 0.01:
+		_place_prop_tipped(node, prop, h)
 		return
+	# Upright: cars keep road facing; others face world axes.
 	node.transform = Transform3D.IDENTITY
-	node.position = Vector3(px, h * 0.5, pz)
+	node.position = Vector3(float(prop["x"]), h * 0.5, float(prop["y"]))
 	if tier == 2:
 		node.rotation.y = -_prop_facing(prop, sim)
 	else:
 		node.rotation = Vector3.ZERO
 
 
-func _place_building_tipped(node: MeshInstance3D, prop: Dictionary, height: float) -> void:
+func _place_prop_tipped(node: MeshInstance3D, prop: Dictionary, height: float) -> void:
 	## Hinge on the footprint edge opposite the tip direction; lean toward the hole.
-	var r: float = float(prop["radius"])
-	var width: float = r * (1.8 if int(prop["tier"]) >= 4 else 1.6)
+	var dims: Vector2 = MunchiesSim.prop_tip_dims(prop)
+	var width: float = dims.x
 	var tip_angle: float = float(prop.get("tip_angle", 0.0))
 	if bool(prop.get("fallen", false)):
 		tip_angle = PI * 0.5

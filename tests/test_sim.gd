@@ -625,7 +625,7 @@ func _check_player_swallow() -> int:
 
 
 func _check_cover_to_swallow() -> int:
-	## No gravity: partial overlap never swallows; full coverage does; props are not pulled.
+	## No gravity: CoG outside never swallows; full coverage does; props are not pulled.
 	var sim := MunchiesSim.new()
 	sim.setup_empty(1, 40.0)
 	var hole := sim.player_hole()
@@ -633,10 +633,11 @@ func _check_cover_to_swallow() -> int:
 	hole["vy"] = 0.0
 	var hr: float = float(hole["radius"])
 	var pr: float = MunchiesSim.TIER0_RADIUS
-	# Partial: dist + pr > hr (edge of prop sticks out).
-	var partial_x: float = hr - pr * 0.4
-	assert(not MunchiesSim.prop_fully_covered(partial_x, pr, hr))
-	sim.objects.append(MunchiesSim.make_prop(42, partial_x, 0.0, 0, pr))
+	# CoG outside the hole — no tip, no swallow (circles may still overlap).
+	var outside_x: float = hr + 0.15
+	assert(outside_x > hr)
+	assert(not MunchiesSim.prop_fully_covered(outside_x, pr, hr))
+	sim.objects.append(MunchiesSim.make_prop(42, outside_x, 0.0, 0, pr))
 	var prop: Dictionary = sim.objects[0]
 	prop["vx"] = 8.0
 	prop["vy"] = 8.0
@@ -645,9 +646,12 @@ func _check_cover_to_swallow() -> int:
 	for i in 120:
 		sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0)
 	if sim.alive_prop_count() != 1:
-		print("FAIL partial cover swallowed prop")
+		print("FAIL outside-CoG prop swallowed")
 		return 1
 	prop = sim.objects[0]
+	if float(prop.get("tip_angle", 0.0)) > 0.01:
+		print("FAIL litter tipped while CoG outside hole")
+		return 1
 	if Vector2(float(prop["x"]), float(prop["y"])).distance_to(start) > 0.01:
 		print("FAIL no-gravity prop was pulled/moved")
 		return 1
@@ -675,8 +679,8 @@ func _check_cover_to_swallow() -> int:
 	var stuck_x: float = hr - br * 0.5
 	assert(not MunchiesSim.prop_fully_covered(stuck_x, br, hr))
 	# CoG outside hole so it does not tip during the partial-cover check.
-	var outside_x: float = hr + 0.2
-	sim.objects.append(MunchiesSim.make_prop(99, outside_x, 0.0, 3, br))
+	var bldg_outside: float = hr + 0.2
+	sim.objects.append(MunchiesSim.make_prop(99, bldg_outside, 0.0, 3, br))
 	for i in 30:
 		sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0)
 	if sim.alive_prop_count() != 1:
@@ -795,6 +799,25 @@ func _check_building_tip_and_fall() -> int:
 		return 1
 	if float(prop.get("tip_angle", 1.0)) > 0.05:
 		print("FAIL tip did not recover; tip_angle=", prop.get("tip_angle", -1))
+		return 1
+	# Litter tips the same way when CoG enters a size-legal hole.
+	sim.objects.clear()
+	hole["x"] = 0.0
+	hole["y"] = 0.0
+	hole["radius"] = 1.0
+	hole["mass"] = 1.0
+	var litter_r: float = MunchiesSim.TIER0_RADIUS
+	sim.objects.append(MunchiesSim.make_prop(3, 0.7, 0.0, 0, litter_r))
+	assert(not MunchiesSim.prop_fully_covered(0.7, litter_r, 1.0))
+	for i in 20:
+		sim.step({int(hole["id"]): Vector2.ZERO}, 1.0 / 60.0)
+	prop = sim.objects[0] if not sim.objects.is_empty() else {}
+	if prop.is_empty():
+		# Rim tip + size gate may already have swallowed — that is also correct.
+		print("ok building tip and fall")
+		return 0
+	if float(prop.get("tip_angle", 0.0)) < 0.15 and not bool(prop.get("fallen", false)):
+		print("FAIL litter did not tip with CoG in hole; tip_angle=", prop.get("tip_angle", 0))
 		return 1
 	print("ok building tip and fall")
 	return 0
