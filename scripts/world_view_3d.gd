@@ -32,7 +32,7 @@ var _static_root: Node3D
 var _props_root: Node3D
 var _holes_root: Node3D
 var _tweens_root: Node3D
-var _prop_nodes: Dictionary = {} ## id -> MeshInstance3D
+var _prop_nodes: Dictionary = {} ## id -> Node3D (composite prop)
 var _hole_nodes: Dictionary = {} ## id -> Node3D (pit + ring)
 var _tween_nodes: Array = []
 var _mat_cache: Dictionary = {} ## Color key -> StandardMaterial3D
@@ -246,15 +246,19 @@ func _sync_props(sim: MunchiesSim) -> void:
 		if not bool(prop["alive"]):
 			continue
 		seen[id] = true
-		var node: MeshInstance3D = _prop_nodes.get(id) as MeshInstance3D
+		var node: Node3D = _prop_nodes.get(id) as Node3D
+		# Rebuild legacy single-mesh props into composites.
+		if node != null and not bool(node.get_meta("composite", false)):
+			node.queue_free()
+			_prop_nodes.erase(id)
+			node = null
 		if node == null:
-			node = _make_prop_mesh(prop)
+			node = _make_prop_node(prop)
 			_props_root.add_child(node)
 			_prop_nodes[id] = node
 		_place_prop(node, prop, sim)
-		# Claim ring tint via modulate-like emission bump on material override when claimed.
 		var claimed: int = int(prop.get("claimed_by", -1))
-		_apply_claim_tint(node, prop, claimed, sim)
+		_apply_claim_tint(node, claimed, sim)
 
 	# Drop dead / missing props.
 	var drop: Array = []
@@ -321,7 +325,7 @@ func _sync_tweens() -> void:
 		var r: float = float(tw["radius"])
 		var tier: int = int(tw["tier"])
 		var fake := {
-			"id": 0,
+			"id": int(tw.get("prop_id", 0)),
 			"x": float(tw["x"]),
 			"y": float(tw["y"]),
 			"radius": r * scale_v,
@@ -333,10 +337,8 @@ func _sync_tweens() -> void:
 			"tip_dx": float(tw.get("tip_dx", 1.0)),
 			"tip_dy": float(tw.get("tip_dy", 0.0)),
 		}
-		var node := _make_prop_mesh(fake)
-		var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
-		col.a = alpha
-		node.material_override = _mat(col, true)
+		var node := _make_prop_node(fake)
+		_apply_prop_alpha(node, alpha)
 		_tweens_root.add_child(node)
 		var drop: float = float(tw.get("drop", 0.0))
 		# Freeze XZ; tip pose + fall straight down (no slide toward hole center).
@@ -348,36 +350,134 @@ func _sync_tweens() -> void:
 		_tween_nodes.append(node)
 
 
-func _make_prop_mesh(prop: Dictionary) -> MeshInstance3D:
+func _make_prop_node(prop: Dictionary) -> Node3D:
+	## Procedural stand-ins (no external GLBs): litter / street / car / building.
+	var root := Node3D.new()
+	root.set_meta("composite", true)
 	var tier: int = int(prop["tier"])
 	var r: float = float(prop["radius"])
 	var col: Color = TIER_COLORS.get(tier, Color.WHITE) as Color
+	var prop_id: int = int(prop.get("id", 0))
 	match tier:
 		0:
-			# Litter scrap
-			return _make_box(Vector3.ZERO, Vector3(r * 1.6, r * 0.6, r * 1.2), col)
+			_build_litter(root, r, col, prop_id)
 		1:
-			# Street prop / bin
-			return _make_cylinder(Vector3.ZERO, r * 0.7, r * 1.6, col)
+			_build_street_prop(root, r, col, prop_id)
 		2:
-			# Car body
-			return _make_box(Vector3.ZERO, Vector3(r * 2.4, r * 0.9, r * 1.15), col)
+			_build_car(root, r, col)
 		3:
-			# Building
-			return _make_box(Vector3.ZERO, Vector3(r * 1.6, r * 2.2, r * 1.6), col)
+			_build_building(root, r, col, false)
 		_:
-			# City block
-			return _make_box(Vector3.ZERO, Vector3(r * 1.8, r * 2.8, r * 1.8), col)
+			_build_building(root, r, col, true)
+	return root
+
+
+func _add_prop_part(root: Node3D, part: MeshInstance3D, base_col: Color) -> void:
+	part.set_meta("base_color", base_col)
+	part.material_override = _mat(base_col)
+	root.add_child(part)
+
+
+func _build_litter(root: Node3D, r: float, col: Color, prop_id: int) -> void:
+	var kind: int = abs(prop_id) % 3
+	match kind:
+		0:
+			# Chip bag / wrapper — flat diamond slab
+			var bag := _make_box(Vector3.ZERO, Vector3(r * 1.5, r * 0.35, r * 1.1), col)
+			bag.rotation.y = PI * 0.25
+			_add_prop_part(root, bag, col)
+			var shine := _make_box(Vector3(0.0, r * 0.12, 0.0), Vector3(r * 0.55, r * 0.12, r * 0.4), col.lightened(0.25))
+			shine.rotation.y = PI * 0.25
+			_add_prop_part(root, shine, col.lightened(0.25))
+		1:
+			# Bottle / can
+			var can := _make_cylinder(Vector3.ZERO, r * 0.45, r * 1.5, col)
+			_add_prop_part(root, can, col)
+			var rim := _make_cylinder(Vector3(0.0, r * 0.55, 0.0), r * 0.38, r * 0.22, col.lightened(0.2))
+			_add_prop_part(root, rim, col.lightened(0.2))
+		_:
+			# Crumpled scrap
+			_add_prop_part(root, _make_box(Vector3.ZERO, Vector3(r * 1.2, r * 0.5, r * 0.9), col), col)
+			_add_prop_part(
+				root,
+				_make_box(Vector3(r * 0.25, r * 0.2, -r * 0.15), Vector3(r * 0.7, r * 0.35, r * 0.55), col.darkened(0.12)),
+				col.darkened(0.12)
+			)
+
+
+func _build_street_prop(root: Node3D, r: float, col: Color, prop_id: int) -> void:
+	var kind: int = abs(prop_id) % 3
+	var dark: Color = col.darkened(0.22)
+	match kind:
+		0:
+			# Bench: seat + back + legs
+			_add_prop_part(root, _make_box(Vector3(0.0, -r * 0.15, 0.0), Vector3(r * 2.1, r * 0.28, r * 0.7), col), col)
+			_add_prop_part(root, _make_box(Vector3(0.0, r * 0.35, -r * 0.28), Vector3(r * 2.1, r * 0.7, r * 0.18), col), col)
+			_add_prop_part(root, _make_box(Vector3(-r * 0.75, -r * 0.55, 0.1), Vector3(r * 0.22, r * 0.7, r * 0.55), dark), dark)
+			_add_prop_part(root, _make_box(Vector3(r * 0.75, -r * 0.55, 0.1), Vector3(r * 0.22, r * 0.7, r * 0.55), dark), dark)
+		1:
+			# Trash bin
+			_add_prop_part(root, _make_cylinder(Vector3.ZERO, r * 0.7, r * 1.55, col), col)
+			_add_prop_part(root, _make_cylinder(Vector3(0.0, r * 0.72, 0.0), r * 0.78, r * 0.22, dark), dark)
+			_add_prop_part(
+				root,
+				_make_box(Vector3(0.0, r * 0.1, 0.0), Vector3(r * 0.55, r * 0.45, r * 0.12), Color(0.12, 0.12, 0.14)),
+				Color(0.12, 0.12, 0.14)
+			)
+		_:
+			# Fire hydrant / bollard
+			_add_prop_part(root, _make_cylinder(Vector3(0.0, -r * 0.15, 0.0), r * 0.55, r * 1.1, col), col)
+			_add_prop_part(root, _make_cylinder(Vector3(0.0, r * 0.55, 0.0), r * 0.35, r * 0.45, col.lightened(0.1)), col.lightened(0.1))
+			_add_prop_part(root, _make_box(Vector3(r * 0.55, r * 0.15, 0.0), Vector3(r * 0.45, r * 0.28, r * 0.28), col), col)
+			_add_prop_part(root, _make_box(Vector3(-r * 0.55, r * 0.15, 0.0), Vector3(r * 0.45, r * 0.28, r * 0.28), col), col)
+
+
+func _build_car(root: Node3D, r: float, col: Color) -> void:
+	## Body + cabin glass + four wheels. Length along local X (yaw faces the road).
+	var body_col: Color = col
+	var cabin_col := Color(0.45, 0.62, 0.78).lerp(col, 0.25)
+	var wheel_col := Color(0.12, 0.12, 0.14)
+	var trim := col.darkened(0.2)
+	# Lower body
+	_add_prop_part(root, _make_box(Vector3(0.0, -r * 0.12, 0.0), Vector3(r * 2.5, r * 0.55, r * 1.15), body_col), body_col)
+	# Cabin / glass
+	_add_prop_part(root, _make_box(Vector3(-r * 0.05, r * 0.32, 0.0), Vector3(r * 1.15, r * 0.42, r * 0.95), cabin_col), cabin_col)
+	# Hood / trunk dark strips
+	_add_prop_part(root, _make_box(Vector3(r * 0.85, r * 0.05, 0.0), Vector3(r * 0.55, r * 0.12, r * 1.0), trim), trim)
+	_add_prop_part(root, _make_box(Vector3(-r * 0.95, r * 0.02, 0.0), Vector3(r * 0.4, r * 0.1, r * 1.0), trim), trim)
+	# Wheels (axle along Z)
+	for xz in [
+		Vector3(r * 0.75, -r * 0.32, r * 0.52),
+		Vector3(r * 0.75, -r * 0.32, -r * 0.52),
+		Vector3(-r * 0.75, -r * 0.32, r * 0.52),
+		Vector3(-r * 0.75, -r * 0.32, -r * 0.52),
+	]:
+		var wheel := _make_cylinder(xz, r * 0.28, r * 0.22, wheel_col)
+		wheel.rotation.x = PI * 0.5
+		_add_prop_part(root, wheel, wheel_col)
+
+
+func _build_building(root: Node3D, r: float, col: Color, is_block: bool) -> void:
+	var w: float = r * (1.8 if is_block else 1.6)
+	var h: float = r * (2.8 if is_block else 2.2)
+	_add_prop_part(root, _make_box(Vector3.ZERO, Vector3(w, h, w), col), col)
+	# Roof cap
+	var roof := col.darkened(0.18)
+	_add_prop_part(root, _make_box(Vector3(0.0, h * 0.48, 0.0), Vector3(w * 1.05, h * 0.08, w * 1.05), roof), roof)
+	# Window band
+	var glass := Color(0.35, 0.45, 0.55).lerp(col, 0.2)
+	_add_prop_part(root, _make_box(Vector3(0.0, h * 0.1, w * 0.51), Vector3(w * 0.7, h * 0.35, w * 0.04), glass), glass)
+	_add_prop_part(root, _make_box(Vector3(w * 0.51, h * 0.1, 0.0), Vector3(w * 0.04, h * 0.35, w * 0.7), glass), glass)
 
 
 func _prop_height(tier: int, r: float) -> float:
 	match tier:
 		0:
-			return r * 0.6
+			return r * 0.7
 		1:
 			return r * 1.6
 		2:
-			return r * 0.9
+			return r * 0.95 ## body + cabin
 		3:
 			return r * 2.2
 		_:
@@ -403,7 +503,7 @@ func _prop_facing(prop: Dictionary, sim: MunchiesSim) -> float:
 	return facing
 
 
-func _place_prop(node: MeshInstance3D, prop: Dictionary, sim: MunchiesSim) -> void:
+func _place_prop(node: Node3D, prop: Dictionary, sim: MunchiesSim) -> void:
 	var r: float = float(prop["radius"])
 	var tier: int = int(prop["tier"])
 	var h: float = _prop_height(tier, r)
@@ -418,7 +518,7 @@ func _place_prop(node: MeshInstance3D, prop: Dictionary, sim: MunchiesSim) -> vo
 	node.rotation = Vector3(0.0, face_yaw, 0.0)
 
 
-func _place_prop_tipped(node: MeshInstance3D, prop: Dictionary, height: float, face_yaw: float = 0.0) -> void:
+func _place_prop_tipped(node: Node3D, prop: Dictionary, height: float, face_yaw: float = 0.0) -> void:
 	## Tip toward the hole while keeping the mesh on the ground.
 	## Cars keep road yaw so a vertical car doesn't snap 90° when tip starts.
 	var dims: Vector2 = MunchiesSim.prop_tip_dims(prop)
@@ -452,15 +552,30 @@ func _place_prop_tipped(node: MeshInstance3D, prop: Dictionary, height: float, f
 	node.transform = Transform3D(basis, mesh_center)
 
 
-func _apply_claim_tint(node: MeshInstance3D, prop: Dictionary, claimed: int, sim: MunchiesSim) -> void:
-	var col: Color = TIER_COLORS.get(int(prop["tier"]), Color.WHITE) as Color
+func _apply_claim_tint(node: Node3D, claimed: int, sim: MunchiesSim) -> void:
+	var ring := Color.WHITE
+	var use_ring := false
 	if claimed != -1:
 		var claimer: Dictionary = sim.hole_by_id(claimed)
 		if not claimer.is_empty():
 			var slot: int = int(claimer.get("slot", 0))
-			var ring: Color = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
-			col = col.lerp(ring, 0.35)
-	node.material_override = _mat(col)
+			ring = MunchiesSim.HOLE_RING_COLORS[clampi(slot, 0, MunchiesSim.HOLE_RING_COLORS.size() - 1)]
+			use_ring = true
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			var mi: MeshInstance3D = child
+			var base: Color = mi.get_meta("base_color", Color.WHITE) as Color
+			var col: Color = base.lerp(ring, 0.35) if use_ring else base
+			mi.material_override = _mat(col)
+
+
+func _apply_prop_alpha(node: Node3D, alpha: float) -> void:
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			var mi: MeshInstance3D = child
+			var base: Color = mi.get_meta("base_color", Color.WHITE) as Color
+			base.a = alpha
+			mi.material_override = _mat(base, true)
 
 
 func _make_hole_node(hole: Dictionary) -> Node3D:

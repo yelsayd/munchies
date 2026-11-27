@@ -561,7 +561,7 @@ static func prop_tip_dims(prop: Dictionary) -> Vector2:
 		1:
 			return Vector2(r * 1.4, r * 1.6)
 		2:
-			return Vector2(r * 2.4, r * 0.9) ## car body length × height
+			return Vector2(r * 2.5, r * 0.95) ## car length × body+cabin height
 		3:
 			return Vector2(r * BUILDING_WIDTH_MULT, r * BUILDING_HEIGHT_MULT)
 		_:
