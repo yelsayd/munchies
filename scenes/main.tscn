@@ -1,9 +1,25 @@
-[gd_scene load_steps=5 format=3 uid="uid://bmunchiesphase1"]
+[gd_scene load_steps=6 format=3 uid="uid://bmunchiesphase1"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world_view.gd" id="2_world"]
 [ext_resource type="AudioStream" path="res://audio/swallow_blip.wav" id="3_blip"]
 [ext_resource type="Script" path="res://scripts/world_view_3d.gd" id="4_world3d"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hudpanel"]
+bg_color = Color(0.035, 0.04, 0.048, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.24, 0.22, 0.7)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 0
+content_margin_top = 0
+content_margin_right = 0
+content_margin_bottom = 0
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -37,69 +53,70 @@ mouse_filter = 2
 [node name="HUD" type="CanvasLayer" parent="."]
 layer = 1
 
-[node name="HudBandBg" type="ColorRect" parent="HUD"]
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 72.0
-grow_horizontal = 2
+[node name="LeftPanel" type="PanelContainer" parent="HUD"]
+offset_left = 12.0
+offset_top = 10.0
+offset_right = 12.0
+offset_bottom = 10.0
 mouse_filter = 2
-color = Color(0.03, 0.035, 0.04, 0.94)
+theme_override_styles/panel = SubResource("StyleBoxFlat_hudpanel")
 
-[node name="HudBandEdge" type="ColorRect" parent="HUD"]
-anchors_preset = 10
-anchor_right = 1.0
-offset_top = 71.0
-offset_bottom = 72.0
-grow_horizontal = 2
-mouse_filter = 2
-color = Color(0.18, 0.22, 0.2, 0.85)
+[node name="Margin" type="MarginContainer" parent="HUD/LeftPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 10
 
-[node name="Margin" type="MarginContainer" parent="HUD"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_top = 12
-theme_override_constants/margin_right = 24
-theme_override_constants/margin_bottom = 12
-
-[node name="VBox" type="VBoxContainer" parent="HUD/Margin"]
+[node name="VBox" type="VBoxContainer" parent="HUD/LeftPanel/Margin"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/separation = 2
+theme_override_constants/separation = 4
 
-[node name="Title" type="Label" parent="HUD/Margin/VBox"]
+[node name="Title" type="Label" parent="HUD/LeftPanel/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 18
 text = "Munchies — Phase 6"
 
-[node name="ModeLine" type="Label" parent="HUD/Margin/VBox"]
+[node name="Score" type="Label" parent="HUD/LeftPanel/Margin/VBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.90, 0.78, 1)
-theme_override_font_sizes/font_size = 16
-text = "Setup · Timer at 2:00"
-
-[node name="Score" type="Label" parent="HUD/Margin/VBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.82, 0.90, 0.84, 1)
+theme_override_colors/font_color = Color(0.88, 0.92, 0.86, 1)
 theme_override_font_sizes/font_size = 15
 text = ""
 
-[node name="Radius" type="Label" parent="HUD/Margin/VBox"]
+[node name="Hint" type="Label" parent="HUD/LeftPanel/Margin/VBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.88, 0.82, 1)
-theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.7, 0.76, 0.72, 1)
+theme_override_font_sizes/font_size = 12
 text = ""
 
-[node name="Hint" type="Label" parent="HUD/Margin/VBox"]
+[node name="TimerPanel" type="PanelContainer" parent="HUD"]
+visible = false
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -90.0
+offset_top = 10.0
+offset_right = 90.0
+offset_bottom = 64.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_hudpanel")
+
+[node name="Margin" type="MarginContainer" parent="HUD/TimerPanel"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.65, 0.72, 0.68, 1)
-theme_override_font_sizes/font_size = 13
-text = ""
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 8
+
+[node name="TimerLabel" type="Label" parent="HUD/TimerPanel/Margin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.97, 0.92, 1)
+theme_override_font_sizes/font_size = 28
+text = "1:00"
+horizontal_alignment = 1
 
 [node name="Setup" type="PanelContainer" parent="HUD"]
 anchors_preset = 8

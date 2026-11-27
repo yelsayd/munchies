@@ -15,9 +15,6 @@ const GROW_FLASH_SEC := 0.34
 ## How far (meters) a swallowed prop falls straight down (no pull toward hole center).
 const SWALLOW_DROP_M := 5.5
 const PANE_GAP := 3.0
-const TOP_HUD_BAND := 72.0
-## Extra HUD band height per leaderboard row (multiplayer).
-const TOP_HUD_ROW := 18.0
 ## Swallow blip: your hole loud, rivals duck so yours stays clear.
 const BLIP_VOL_MINE_DB := -5.0
 const BLIP_VOL_OTHER_DB := -26.0
@@ -36,13 +33,12 @@ enum PauseChoice { RESUME, RESTART, EXIT }
 @onready var world3d_hold: Node = $World3DHold
 @onready var pane_host: Control = $SplitLayer/PaneHost
 @onready var hud: CanvasLayer = $HUD
-@onready var hud_band_bg: ColorRect = $HUD/HudBandBg
-@onready var hud_band_edge: ColorRect = $HUD/HudBandEdge
-@onready var title_label: Label = $HUD/Margin/VBox/Title
-@onready var mode_line: Label = $HUD/Margin/VBox/ModeLine
-@onready var score_label: Label = $HUD/Margin/VBox/Score
-@onready var radius_label: Label = $HUD/Margin/VBox/Radius
-@onready var hint_label: Label = $HUD/Margin/VBox/Hint
+@onready var left_panel: PanelContainer = $HUD/LeftPanel
+@onready var timer_panel: PanelContainer = $HUD/TimerPanel
+@onready var title_label: Label = $HUD/LeftPanel/Margin/VBox/Title
+@onready var score_label: Label = $HUD/LeftPanel/Margin/VBox/Score
+@onready var hint_label: Label = $HUD/LeftPanel/Margin/VBox/Hint
+@onready var timer_label: Label = $HUD/TimerPanel/Margin/TimerLabel
 @onready var setup_panel: PanelContainer = $HUD/Setup
 @onready var setup_list: ItemList = $HUD/Setup/Margin/VBox/ModeList
 @onready var slot_list: ItemList = $HUD/Setup/Margin/VBox/SlotList
@@ -101,9 +97,10 @@ func _ready() -> void:
 	world.set("host", self)
 	world3d.set("host", self)
 	pane_host.set_anchors_preset(Control.PRESET_FULL_RECT)
-	pane_host.offset_top = TOP_HUD_BAND
+	pane_host.offset_top = 0.0
 	split_layer.visible = false
 	pause_overlay.visible = false
+	timer_panel.visible = false
 	# Script owns ↑↓; ItemLists must not also consume ui_up/ui_down via focus.
 	setup_list.focus_mode = Control.FOCUS_NONE
 	slot_list.focus_mode = Control.FOCUS_NONE
@@ -207,10 +204,10 @@ func _show_setup() -> void:
 	split_layer.visible = false
 	setup_panel.visible = true
 	end_panel.visible = false
+	timer_panel.visible = false
+	left_panel.visible = true
 	title_label.text = "Munchies — Phase 6"
-	mode_line.text = "Setup · Timer at 2:00 · optional bots · F3 toggles 2D/3D view"
-	score_label.text = ""
-	radius_label.text = ""
+	score_label.text = "Setup · optional bots · F3 toggles 2D/3D"
 	hint_label.text = ""
 	_setup_focus = SetupFocus.MODES
 	_apply_setup_focus()
@@ -720,14 +717,14 @@ func _rebuild_panes_2d() -> void:
 	world.queue_redraw()
 
 
-func _make_pane_overlay(frame: Control, hole: Dictionary, _slot_fallback: int) -> Dictionary:
-	## Local score/radius sit top-right so they never clash with the left leaderboard.
+func _make_pane_overlay(frame: Control, _hole: Dictionary, _slot_fallback: int) -> Dictionary:
+	## Local score/radius sit top-right in a dark chip so they stay readable.
 	## Hole names live on the hole mesh / 2D draw, not here.
 	var overlay := MarginContainer.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_theme_constant_override("margin_left", 10)
-	overlay.add_theme_constant_override("margin_top", 8)
+	overlay.add_theme_constant_override("margin_top", 10)
 	overlay.add_theme_constant_override("margin_right", 12)
 	overlay.add_theme_constant_override("margin_bottom", 8)
 	frame.add_child(overlay)
@@ -741,10 +738,28 @@ func _make_pane_overlay(frame: Control, hole: Dictionary, _slot_fallback: int) -
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
 
+	var chip := PanelContainer.new()
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.035, 0.04, 0.048, 0.92)
+	sb.set_border_width_all(1)
+	sb.border_color = Color(0.2, 0.24, 0.22, 0.7)
+	sb.set_corner_radius_all(8)
+	chip.add_theme_stylebox_override("panel", sb)
+	row.add_child(chip)
+
+	var chip_margin := MarginContainer.new()
+	chip_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip_margin.add_theme_constant_override("margin_left", 12)
+	chip_margin.add_theme_constant_override("margin_top", 8)
+	chip_margin.add_theme_constant_override("margin_right", 12)
+	chip_margin.add_theme_constant_override("margin_bottom", 8)
+	chip.add_child(chip_margin)
+
 	var vbox := VBoxContainer.new()
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_theme_constant_override("separation", 2)
-	row.add_child(vbox)
+	chip_margin.add_child(vbox)
 
 	var score_l := Label.new()
 	score_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -759,13 +774,6 @@ func _make_pane_overlay(frame: Control, hole: Dictionary, _slot_fallback: int) -
 	vbox.add_child(radius_l)
 
 	return {"score": score_l, "radius": radius_l}
-
-
-func _hud_band_height() -> float:
-	## Leave room for title + mode + leaderboard so it does not sit on the world.
-	if sim != null and sim.holes.size() > 1:
-		return 52.0 + float(sim.holes.size()) * TOP_HUD_ROW + 8.0
-	return TOP_HUD_BAND
 
 
 func _keyboard_hole() -> Dictionary:
@@ -944,36 +952,35 @@ func _update_camera_3d(pane: Dictionary, hole: Dictionary, blend: float) -> void
 func _update_hud() -> void:
 	if _screen != Screen.PLAYING or sim == null or sim.config == null:
 		return
-	var band_h: float = _hud_band_height()
-	pane_host.offset_top = band_h
-	hud_band_bg.offset_bottom = band_h
-	hud_band_edge.offset_top = band_h - 1.0
-	hud_band_edge.offset_bottom = band_h
+	# World is fullscreen; HUD floats in content-sized dark panels over it.
+	pane_host.offset_top = 0.0
+	left_panel.visible = true
 	title_label.text = "Munchies — %s" % sim.config.label()
-	mode_line.text = _mode_line_text()
 	if sim.holes.size() > 1:
-		# Multiplayer: shared score band becomes a ranked leaderboard.
 		score_label.text = _leaderboard_text()
-		radius_label.text = ""
 	elif use_3d_view:
 		score_label.text = "3D · F3 → 2D"
-		radius_label.text = ""
 	else:
 		score_label.text = "2D · F3 → 3D"
-		radius_label.text = ""
+
+	# Mode status (timer, target, …) sits top-center in its own panel.
+	var status: String = _mode_status_text()
+	timer_panel.visible = not status.is_empty()
+	if not status.is_empty():
+		timer_label.text = status
+
 	if _paused:
 		hint_label.text = ""
 	elif sim.config.mode == MatchConfig.Mode.UNLIMITED:
-		# Unlimited: no clock, no target, no end card.
-		hint_label.text = "Unlimited sandbox — Esc pause · F3 view · leave running"
+		hint_label.text = "Esc pause · F3 view"
 	elif sim.match_over and not sim.config.has_end_card():
-		hint_label.text = "Unlimited running — Esc pause"
+		hint_label.text = "Esc pause"
 	else:
 		var alive_n := 0
 		for h in sim.holes:
 			if h["alive"]:
 				alive_n += 1
-		hint_label.text = "WASD/arrows (You) · Esc pause · F3 view · alive %d/%d" % [alive_n, sim.holes.size()]
+		hint_label.text = "WASD · Esc pause · F3 · alive %d/%d" % [alive_n, sim.holes.size()]
 
 
 func _leaderboard_text() -> String:
@@ -995,28 +1002,28 @@ func _leaderboard_text() -> String:
 	return "\n".join(lines)
 
 
-func _mode_line_text() -> String:
+func _mode_status_text() -> String:
+	## Top-center status. Timer is just the clock, larger; other modes keep a short label.
 	var cfg: MatchConfig = sim.config
 	match cfg.mode:
 		MatchConfig.Mode.TIMER:
 			var rem: float = sim.time_remaining()
 			var m: int = int(rem) / 60
 			var s: int = int(rem) % 60
-			return "Time  %d:%02d" % [m, s]
+			return "%d:%02d" % [m, s]
 		MatchConfig.Mode.SCORE_TARGET:
 			var best := 0
 			for h in sim.holes:
 				best = maxi(best, int(h["score"]))
-			return "Target  %d  ·  best %d" % [cfg.score_target, best]
+			return "Target %d · %d" % [cfg.score_target, best]
 		MatchConfig.Mode.MAP_CLEARED:
-			return "Swallowable left  %d" % sim.swallowable_prop_count()
+			return "Left %d" % sim.swallowable_prop_count()
 		MatchConfig.Mode.LAST_STANDING:
 			var n := 0
 			for h in sim.holes:
 				if h["alive"]:
 					n += 1
-			return "Alive  %d" % n
+			return "Alive %d" % n
 		MatchConfig.Mode.UNLIMITED:
-			# Never open unlimited with a clock or score target.
-			return "Unlimited — props respawn · no player swallow"
+			return "Unlimited"
 	return cfg.label()
