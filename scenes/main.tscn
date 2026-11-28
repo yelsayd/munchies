@@ -179,14 +179,14 @@ item_count = 0
 [node name="SlotSummary" type="Label" parent="HUD/Setup/Margin/VBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
-text = "Filled 4/4 · bots 3 · panes: 4 quadrants"
+text = "Filled 4/4 · humans 1 · bots 3  (pads deferred)"
 horizontal_alignment = 1
 
 [node name="SetupHint" type="Label" parent="HUD/Setup/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.75, 0.7, 1)
 theme_override_font_sizes/font_size = 12
-text = "Tab modes/slots · ↑↓ move · ←→ bot/empty · Enter start"
+text = "Tab modes/slots · ↑↓ move · ←→ bot/empty/P2 · Enter start"
 horizontal_alignment = 1
 
 [node name="EndDim" type="ColorRect" parent="HUD"]

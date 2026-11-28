@@ -1,8 +1,9 @@
 extends Node2D
-## Setup (modes + slot list + optional bots) → 3D match view.
-## Slot 0 = local human (keyboard / pad); other filled slots = bots until pads exist.
+## Setup (modes + slot list + optional bots / P2) → 3D match view.
+## Slot 0 = P1 (WASD / pad). Another slot can be P2 (arrow keys) for couch keyboard.
+## Remaining filled slots = bots. Extra pads still deferred.
 ## Unlimited never shows a clock or score target. Shared end card for ending modes.
-## Presentation-only World3D reads sim each frame (one pane following You).
+## World3D skins the sim; one pane for solo, side-by-side when two humans play.
 
 const CAMERA_SETTLE := 0.2
 const SWALLOW_TWEEN_SEC := 0.72
@@ -59,7 +60,7 @@ var _screen: Screen = Screen.SETUP
 var _mode_index: int = 0 ## Timer highlighted by default
 var _setup_focus: SetupFocus = SetupFocus.MODES
 var _slot_cursor: int = 1
-## Four setup slots. Slot 0 is always the local human when filled.
+## Four setup slots. Slot 0 is always P1 (WASD/pad) when filled.
 var _slots: PackedStringArray = MatchConfig.default_slots(4)
 var _menu_stick_cd: float = 0.0
 var _menu_stick_armed: bool = true
@@ -131,11 +132,13 @@ func _slot_label(index: int) -> String:
 	var mark := "▸ " if _setup_focus == SetupFocus.SLOTS and index == _slot_cursor else "  "
 	match kind:
 		MatchConfig.SLOT_KEYBOARD:
-			return "%s%d. You (keyboard / pad)" % [mark, index + 1]
+			return "%s%d. P1 (WASD / pad)" % [mark, index + 1]
+		MatchConfig.SLOT_KEYBOARD_P2:
+			return "%s%d. P2 (arrows)" % [mark, index + 1]
 		MatchConfig.SLOT_BOT:
 			return "%s%d. Bot" % [mark, index + 1]
 		_:
-			return "%s%d. Empty  (optional bot)" % [mark, index + 1]
+			return "%s%d. Empty  (bot / P2)" % [mark, index + 1]
 
 
 func _refresh_slot_list() -> void:
@@ -148,16 +151,21 @@ func _refresh_slot_list() -> void:
 		slot_list.deselect_all()
 	var filled := 0
 	var bots := 0
+	var humans := 0
 	for k in _slots:
 		if str(k) == MatchConfig.SLOT_EMPTY:
 			continue
 		filled += 1
 		if str(k) == MatchConfig.SLOT_BOT:
 			bots += 1
-	setup_summary.text = "Filled %d/4 · bots %d  (pads deferred)" % [filled, bots]
+		elif MatchConfig.is_human_slot(str(k)):
+			humans += 1
+	setup_summary.text = "Filled %d/4 · humans %d · bots %d  (pads deferred)" % [
+		filled, humans, bots,
+	]
 	var focus_hint := "modes" if _setup_focus == SetupFocus.MODES else "slots"
 	setup_hint.text = (
-		"Tab/LB: %s · ↑↓/stick move · ←→ bot/empty · A/Enter start · Start/B pause in-match"
+		"Tab/LB: %s · ↑↓/stick move · ←→ bot/empty/P2 · A/Enter start · Start/B pause in-match"
 		% focus_hint
 	)
 
@@ -173,7 +181,7 @@ func _show_setup() -> void:
 	timer_panel.visible = false
 	left_panel.visible = true
 	title_label.text = "Munchies"
-	score_label.text = "Setup · optional bots"
+	score_label.text = "Setup · bots or P2 (arrows)"
 	hint_label.text = ""
 	_setup_focus = SetupFocus.MODES
 	_reset_menu_stick()
@@ -336,15 +344,28 @@ func _menu_nav_step(dt: float) -> Vector2i:
 
 func _toggle_slot(index: int) -> void:
 	if index <= 0:
-		# Slot 1 (index 0) stays the local human.
+		# Slot 1 (index 0) stays P1 (WASD / pad).
 		_slots[0] = MatchConfig.SLOT_KEYBOARD
 		_refresh_slot_list()
 		return
-	if str(_slots[index]) == MatchConfig.SLOT_BOT:
+	# Cycle bot → empty → P2 (arrows) → bot. Only one P2 at a time.
+	var kind: String = str(_slots[index])
+	if kind == MatchConfig.SLOT_BOT:
 		_slots[index] = MatchConfig.SLOT_EMPTY
+	elif kind == MatchConfig.SLOT_EMPTY:
+		_clear_other_p2(index)
+		_slots[index] = MatchConfig.SLOT_KEYBOARD_P2
 	else:
 		_slots[index] = MatchConfig.SLOT_BOT
 	_refresh_slot_list()
+
+
+func _clear_other_p2(keep_index: int) -> void:
+	for i in _slots.size():
+		if i == keep_index:
+			continue
+		if str(_slots[i]) == MatchConfig.SLOT_KEYBOARD_P2:
+			_slots[i] = MatchConfig.SLOT_BOT
 
 
 func _process_playing(dt: float) -> void:
@@ -435,24 +456,67 @@ func _process_ended() -> void:
 
 
 func _collect_inputs() -> Dictionary:
-	# Human hole(s) read keyboard / left stick / D-pad; bots emit Input. Extra pads deferred.
+	# Humans: P1 = WASD/pad, P2 = arrows. Solo merges both key sets. Bots emit Input.
 	var inputs := {}
+	var dual := _human_hole_count() > 1
 	for hole_v in sim.holes:
 		var hole: Dictionary = hole_v
 		var id: int = int(hole["id"])
 		if bool(hole.get("is_bot", false)):
 			inputs[id] = MunchiesBot.input_for(sim, id)
 		else:
-			inputs[id] = _read_player_input()
+			inputs[id] = _read_player_input_for(hole, dual)
 	return inputs
 
 
-func _read_player_input() -> Vector2:
-	## WASD/arrows/D-pad/left stick. Diagonal keys normalize; stick keeps analog magnitude.
-	var v := Input.get_vector("move_left", "move_right", "move_up", "move_down")
+func _slot_kind_for(hole: Dictionary) -> String:
+	if sim == null or sim.config == null:
+		return MatchConfig.SLOT_KEYBOARD
+	var slot_i: int = int(hole.get("slot", 0))
+	if slot_i < 0 or slot_i >= sim.config.slots.size():
+		return MatchConfig.SLOT_KEYBOARD
+	return str(sim.config.slots[slot_i])
+
+
+func _read_player_input_for(hole: Dictionary, dual: bool) -> Vector2:
+	var kind := _slot_kind_for(hole)
+	if dual and kind == MatchConfig.SLOT_KEYBOARD_P2:
+		return _read_axis_input("p2_move_left", "p2_move_right", "p2_move_up", "p2_move_down")
+	if dual:
+		# P1 only: WASD + pad (arrows belong to P2).
+		return _read_axis_input("move_left", "move_right", "move_up", "move_down")
+	# Solo: keep classic WASD + arrows + pad on the one human hole.
+	var v := _read_axis_input("move_left", "move_right", "move_up", "move_down")
+	var p2 := _read_axis_input("p2_move_left", "p2_move_right", "p2_move_up", "p2_move_down")
+	v += p2
 	if v.length_squared() > 1.0:
 		v = v.normalized()
 	return v
+
+
+func _read_axis_input(left: StringName, right: StringName, up: StringName, down: StringName) -> Vector2:
+	## Diagonal keys normalize; stick keeps analog magnitude.
+	var v := Input.get_vector(left, right, up, down)
+	if v.length_squared() > 1.0:
+		v = v.normalized()
+	return v
+
+
+func _human_hole_count() -> int:
+	var n := 0
+	for hole_v in sim.holes:
+		if not bool(hole_v.get("is_bot", false)):
+			n += 1
+	return n
+
+
+func _human_holes() -> Array:
+	var out: Array = []
+	for hole_v in sim.holes:
+		var hole: Dictionary = hole_v
+		if not bool(hole.get("is_bot", false)):
+			out.append(hole)
+	return out
 
 
 func _handle_events(events: Array) -> void:
@@ -482,12 +546,13 @@ func _handle_events(events: Array) -> void:
 				"tip_dy": float(ev.get("tip_dy", 0.0)),
 			})
 			# Rim flash is grow-only — swallow still gets an audio blip.
-			# Duck rivals so your own swallows stay clear.
+			# Duck bots so human swallows stay clear (either local player).
 			if blip_player.stream != null:
-				var mine := _keyboard_hole()
-				var mine_id: int = int(mine.get("id", -1)) if not mine.is_empty() else -1
+				var human_ids := {}
+				for hh in _human_holes():
+					human_ids[int(hh["id"])] = true
 				blip_player.volume_db = (
-					BLIP_VOL_MINE_DB if hid == mine_id else BLIP_VOL_OTHER_DB
+					BLIP_VOL_MINE_DB if human_ids.has(hid) else BLIP_VOL_OTHER_DB
 				)
 				blip_player.pitch_scale = 1.0 + 0.04 * float(ev.get("tier", 0))
 				blip_player.play()
@@ -545,83 +610,93 @@ func _teardown_panes() -> void:
 
 func _rebuild_panes() -> void:
 	_teardown_panes()
-	## One 3D pane following the keyboard hole.
-	var follow: Dictionary = _keyboard_hole()
-	if follow.is_empty() and not sim.holes.is_empty():
-		follow = sim.holes[0]
-	if follow.is_empty():
+	## One pane per human hole (solo fullscreen, dual side-by-side). Shared World3D.
+	var follows: Array = _human_holes()
+	if follows.is_empty() and not sim.holes.is_empty():
+		follows = [sim.holes[0]]
+	if follows.is_empty():
 		return
 
-	var layout := _make_layout(1)
+	var n: int = follows.size()
+	var layout := _make_layout(n)
 	pane_host.add_child(layout)
-	var cell: Control = layout.get_node("Cell0") as Control
 
-	var frame := Control.new()
-	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	cell.add_child(frame)
+	var shared_world: World3D = null
+	for i in n:
+		var follow: Dictionary = follows[i]
+		var cell: Control = layout.get_node("Cell%d" % i) as Control
 
-	var svc := SubViewportContainer.new()
-	svc.set_anchors_preset(Control.PRESET_FULL_RECT)
-	svc.stretch = true
-	svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	frame.add_child(svc)
+		var frame := Control.new()
+		frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+		frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_child(frame)
 
-	var sv := SubViewport.new()
-	sv.disable_3d = false
-	sv.transparent_bg = false
-	sv.handle_input_locally = false
-	sv.gui_disable_input = true
-	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	sv.own_world_3d = true
-	sv.msaa_3d = Viewport.MSAA_4X
-	sv.size = Vector2i(2, 2)
-	svc.add_child(sv)
+		var svc := SubViewportContainer.new()
+		svc.set_anchors_preset(Control.PRESET_FULL_RECT)
+		svc.stretch = true
+		svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		frame.add_child(svc)
 
-	# Soft daylight + sky so meshes read without a baked env resource.
-	var env := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.45, 0.58, 0.72)
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.55, 0.60, 0.58)
-	environment.ambient_light_energy = 0.55
-	env.environment = environment
-	sv.add_child(env)
+		var sv := SubViewport.new()
+		sv.disable_3d = false
+		sv.transparent_bg = false
+		sv.handle_input_locally = false
+		sv.gui_disable_input = true
+		sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		sv.msaa_3d = Viewport.MSAA_4X
+		sv.size = Vector2i(2, 2)
+		svc.add_child(sv)
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48, 35, 0)
-	sun.light_energy = 1.15
-	sun.shadow_enabled = false
-	sv.add_child(sun)
+		if i == 0:
+			sv.own_world_3d = true
+			# Soft daylight so meshes read without a baked env resource.
+			var env := WorldEnvironment.new()
+			var environment := Environment.new()
+			environment.background_mode = Environment.BG_COLOR
+			environment.background_color = Color(0.45, 0.58, 0.72)
+			environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+			environment.ambient_light_color = Color(0.55, 0.60, 0.58)
+			environment.ambient_light_energy = 0.55
+			env.environment = environment
+			sv.add_child(env)
 
-	world3d.reparent(sv)
-	if world3d.has_method("clear_presentation"):
-		world3d.clear_presentation()
-	world3d.set("host", self)
+			var sun := DirectionalLight3D.new()
+			sun.rotation_degrees = Vector3(-48, 35, 0)
+			sun.light_energy = 1.15
+			sun.shadow_enabled = false
+			sv.add_child(sun)
 
-	var cam := Camera3D.new()
-	cam.current = true
-	cam.fov = 50.0
-	cam.near = 0.2
-	cam.far = 400.0
-	sv.add_child(cam)
+			world3d.reparent(sv)
+			if world3d.has_method("clear_presentation"):
+				world3d.clear_presentation()
+			world3d.set("host", self)
+			shared_world = sv.world_3d
+		else:
+			sv.own_world_3d = false
+			sv.world_3d = shared_world
 
-	var labels := _make_pane_overlay(frame, follow, 0)
-	var look := Vector3(float(follow["x"]), 0.0, float(follow["y"]))
-	var r: float = float(follow["radius"])
-	_place_camera_3d(cam, look, r)
+		var cam := Camera3D.new()
+		cam.current = true
+		cam.fov = 50.0
+		cam.near = 0.2
+		cam.far = 400.0
+		sv.add_child(cam)
 
-	_panes.append({
-		"hole_id": int(follow["id"]),
-		"camera": cam,
-		"cam_pos": look,
-		"cam_zoom": r,
-		"score_label": labels["score"],
-		"radius_label": labels["radius"],
-		"viewport": sv,
-		"frame": frame,
-	})
+		var labels := _make_pane_overlay(frame, follow, int(follow.get("slot", i)))
+		var look := Vector3(float(follow["x"]), 0.0, float(follow["y"]))
+		var r: float = float(follow["radius"])
+		_place_camera_3d(cam, look, r)
+
+		_panes.append({
+			"hole_id": int(follow["id"]),
+			"camera": cam,
+			"cam_pos": look,
+			"cam_zoom": r,
+			"score_label": labels["score"],
+			"radius_label": labels["radius"],
+			"viewport": sv,
+			"frame": frame,
+		})
 
 	_sync_pane_sizes()
 	if world3d.has_method("sync_from_sim"):
@@ -688,10 +763,14 @@ func _make_pane_overlay(frame: Control, _hole: Dictionary, _slot_fallback: int) 
 
 
 func _keyboard_hole() -> Dictionary:
-	for hole_v in sim.holes:
+	## First human hole (P1). Prefer WASD/pad slot when present.
+	var humans := _human_holes()
+	for hole_v in humans:
 		var hole: Dictionary = hole_v
-		if not bool(hole.get("is_bot", false)):
+		if _slot_kind_for(hole) == MatchConfig.SLOT_KEYBOARD:
 			return hole
+	if not humans.is_empty():
+		return humans[0]
 	return {}
 
 
@@ -847,7 +926,12 @@ func _update_hud() -> void:
 		for h in sim.holes:
 			if h["alive"]:
 				alive_n += 1
-		hint_label.text = "WASD / stick · Esc/Start pause · alive %d/%d" % [alive_n, sim.holes.size()]
+		var controls := "WASD+arrows / stick"
+		if _human_hole_count() > 1:
+			controls = "P1 WASD/stick · P2 arrows"
+		hint_label.text = "%s · Esc/Start pause · alive %d/%d" % [
+			controls, alive_n, sim.holes.size(),
+		]
 
 
 func _leaderboard_text() -> String:

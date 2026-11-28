@@ -22,6 +22,7 @@ func _init() -> void:
 	failed += _check_progression_gates()
 	failed += _check_match_config_flags()
 	failed += _check_setup_slots_optional_bots()
+	failed += _check_dual_keyboard_slots()
 	failed += _check_timer_ends()
 	failed += _check_score_target_ends()
 	failed += _check_map_cleared_ends()
@@ -393,6 +394,70 @@ func _check_setup_slots_optional_bots() -> int:
 		print("FAIL solo unlimited slot")
 		return 1
 	print("ok setup slots optional bots")
+	return 0
+
+
+func _check_dual_keyboard_slots() -> int:
+	## P1 (WASD/pad) + P2 (arrows) are both humans; second P2 demoted.
+	var cfg := MatchConfig.for_mode(MatchConfig.Mode.TIMER, 4)
+	cfg.set_slots(PackedStringArray([
+		MatchConfig.SLOT_KEYBOARD,
+		MatchConfig.SLOT_KEYBOARD_P2,
+		MatchConfig.SLOT_BOT,
+		MatchConfig.SLOT_EMPTY,
+	]))
+	if cfg.human_slot_count() != 2 or cfg.active_hole_count() != 3:
+		print("FAIL dual keyboard counts: humans=", cfg.human_slot_count(), " filled=", cfg.active_hole_count())
+		return 1
+	# Extra P2 must collapse to a single arrow human.
+	cfg.set_slots(PackedStringArray([
+		MatchConfig.SLOT_KEYBOARD,
+		MatchConfig.SLOT_KEYBOARD_P2,
+		MatchConfig.SLOT_KEYBOARD_P2,
+		MatchConfig.SLOT_BOT,
+	]))
+	var p2_n := 0
+	for k in cfg.slots:
+		if str(k) == MatchConfig.SLOT_KEYBOARD_P2:
+			p2_n += 1
+	if p2_n != 1 or str(cfg.slots[2]) != MatchConfig.SLOT_BOT:
+		print("FAIL expected one P2 and demoted extra, slots=", cfg.slots)
+		return 1
+	var dual := MatchConfig.for_mode(MatchConfig.Mode.LAST_STANDING, 4)
+	dual.set_slots(PackedStringArray([
+		MatchConfig.SLOT_KEYBOARD,
+		MatchConfig.SLOT_KEYBOARD_P2,
+		MatchConfig.SLOT_EMPTY,
+		MatchConfig.SLOT_BOT,
+	]))
+	var sim := MunchiesSim.new()
+	sim.setup_match(dual, 9)
+	if sim.holes.size() != 3:
+		print("FAIL dual keyboard match hole count: ", sim.holes.size())
+		return 1
+	var humans := 0
+	var names := {}
+	for h in sim.holes:
+		if bool(h["is_bot"]):
+			continue
+		humans += 1
+		names[str(h["name"])] = true
+	if humans != 2:
+		print("FAIL expected 2 human holes, got ", humans)
+		return 1
+	if not names.has("P1") or not names.has("P2"):
+		print("FAIL expected P1 and P2 names, got ", names)
+		return 1
+	if not MatchConfig.is_human_slot(MatchConfig.SLOT_KEYBOARD):
+		print("FAIL SLOT_KEYBOARD should be human")
+		return 1
+	if not MatchConfig.is_human_slot(MatchConfig.SLOT_KEYBOARD_P2):
+		print("FAIL SLOT_KEYBOARD_P2 should be human")
+		return 1
+	if MatchConfig.is_human_slot(MatchConfig.SLOT_BOT):
+		print("FAIL SLOT_BOT should not be human")
+		return 1
+	print("ok dual keyboard slots")
 	return 0
 
 

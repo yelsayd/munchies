@@ -240,7 +240,7 @@ func setup_map(world_seed: int = 42, spawn_pad: int = 0) -> void:
 	holes.append(make_hole(_alloc_id(), pad.x, pad.y, false, 0))
 
 
-## Match from setup slots (keyboard / bot / empty). Pads deferred.
+## Match from setup slots (keyboard / keyboard_p2 / bot / empty). Extra pads deferred.
 func setup_match(cfg: MatchConfig, world_seed: int = 42) -> void:
 	config = cfg
 	_layout_map(world_seed)
@@ -249,6 +249,11 @@ func setup_match(cfg: MatchConfig, world_seed: int = 42) -> void:
 		kinds = MatchConfig.default_slots(clampi(cfg.hole_count, 1, 4))
 	var bot_names: PackedStringArray = _shuffled_bot_names()
 	var bot_name_i := 0
+	var human_n := 0
+	for slot_i in mini(4, kinds.size()):
+		var kind: String = str(kinds[slot_i])
+		if MatchConfig.is_human_slot(kind):
+			human_n += 1
 	for slot_i in mini(4, kinds.size()):
 		var kind: String = str(kinds[slot_i])
 		if kind == MatchConfig.SLOT_EMPTY:
@@ -259,6 +264,10 @@ func setup_match(cfg: MatchConfig, world_seed: int = 42) -> void:
 		if is_bot:
 			nm = str(bot_names[bot_name_i % bot_names.size()])
 			bot_name_i += 1
+		elif kind == MatchConfig.SLOT_KEYBOARD_P2:
+			nm = "P2"
+		elif human_n > 1:
+			nm = "P1"
 		holes.append(make_hole(_alloc_id(), pad.x, pad.y, is_bot, slot_i, nm))
 	if holes.is_empty():
 		# Safety: always at least the keyboard hole.
